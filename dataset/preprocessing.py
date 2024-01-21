@@ -6,6 +6,7 @@ import torch
 import torchaudio
 from constants import *
 from mido import MidiFile
+from tqdm import tqdm
 
 
 def convert_midi(midi_path):
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     flac_list = list(content_dir.glob("*.flac"))
     midi_list = list(content_dir.glob("*.mid"))
 
-    for flac in midi_list:
+    for flac in flac_list:
         # """
         wave, sr = torchaudio.load(flac)
         wave_mono = wave.mean(dim=0)
