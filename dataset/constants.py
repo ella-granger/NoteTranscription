@@ -5,3 +5,5 @@ HOP_LENGTH = 256
 PAD_MODE = "constant"
 N_MELS = 256
 MEL_EPSILON = 1e-8
+
+SEG_LEN = 312
