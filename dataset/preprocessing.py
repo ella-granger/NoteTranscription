@@ -74,19 +74,20 @@ def convert_midi(midi_path):
 
 
 if __name__ == "__main__":
-    content_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale/BachChorale")
-    target_dir = Path("/storageSSD/huiran/NoteTranscription")
+    # content_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale/BachChorale")
+    # target_dir = Path("/storageSSD/huiran/NoteTranscription")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/midi_align")
-    # target_dir = Path("./test")
+    content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
+    target_dir = Path("./test")
     mel_dir = target_dir / "BachChorale" / "mel"
     note_dir = target_dir / "BachChorale" / "note"
     mel_dir.mkdir(parents=True, exist_ok=True)
     note_dir.mkdir(parents=True, exist_ok=True)
     
-    flac_list = list(content_dir.glob("*.flac"))
+    flac_list = list(content_dir.glob("*.WAV"))
     midi_list = list(content_dir.glob("*.mid"))
 
-    for flac in flac_list:
+    for flac in tqdm(flac_list):
         # """
         wave, sr = torchaudio.load(flac)
         wave_mono = wave.mean(dim=0)
@@ -106,8 +107,8 @@ if __name__ == "__main__":
         with open(mel_dir / ("%s.pkl" % flac.stem), 'wb') as fout:
             pickle.dump(mel_spec, fout, protocol=4)
 
+        """
         midi_path = content_dir / ("%s.mid" % flac.stem)
-        # """
         if not midi_path.exists():
             continue
         
@@ -115,4 +116,5 @@ if __name__ == "__main__":
 
         with open(note_dir / ("%s.pkl" % flac.stem), 'wb') as fout:
             pickle.dump(track_note_list, fout, protocol=4)
+        """
 
