@@ -24,6 +24,12 @@ def patch_trg(trg):
     return trg, gold
 
 
+def masked_l1(pred, gt, mask):
+    diff = pred - gt.unsqueeze(-1)
+    loss = torch.sum(torch.abs(diff[mask.unsqueeze(-1)]))
+    return loss
+
+
 def masked_l2(pred, gt, mask):
     diff = pred - gt.unsqueeze(-1)
     loss = torch.sum(diff[mask.unsqueeze(-1)] ** 2)
@@ -68,7 +74,8 @@ def config():
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, learning_rate_decay_steps,
           clip_gradient_norm, epochs, data_path,
-          output_interval, summary_interval, val_interval):
+          output_interval, summary_interval, val_interval,
+          loss_norm, time_loss_alpha):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -122,8 +129,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             seq_mask = (pitch_i != PAD_IDX)
-            start_loss = masked_l2(start_p, start_o, seq_mask)
-            end_loss = masked_l2(end_p, end_o, seq_mask)
+            if loss_norm == 1:
+                start_loss = time_loss_alpha * masked_l1(start_p, start_o, seq_mask)
+                end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
+            else:
+                start_loss = time_loss_alpha * masked_l2(start_p, start_o, seq_mask)
+                end_loss = time_loss_alpha * masked_l2(end_p, end_o, seq_mask)
             loss = pitch_loss + start_loss + end_loss
             loss.backward()
             optimizer.step_and_update_lr()
@@ -170,8 +181,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
                         pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                         seq_mask = (pitch_i != PAD_IDX)
-                        start_loss = masked_l2(start_p, start_o, seq_mask)
-                        end_loss = masked_l2(end_p, end_o, seq_mask)
+                        if loss_norm == 1:
+                            start_loss = time_loss_alpha * masked_l1(start_p, start_o, seq_mask)
+                            end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
+                        else:
+                            start_loss = time_loss_alpha * masked_l2(start_p, start_o, seq_mask)
+                            end_loss = time_loss_alpha * masked_l2(end_p, end_o, seq_mask)
                         loss = pitch_loss + start_loss + end_loss
 
                         if i < 1:
