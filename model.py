@@ -43,9 +43,12 @@ class NoteTransformer(nn.Module):
                                d_inner=d_inner)
 
         # Result
-        self.trg_pitch_prj = nn.Linear(d_model * 3 // 4, PAD_IDX+1)
-        self.trg_start_prj = nn.Linear(d_model // 8, 1)
-        self.trg_end_prj = nn.Linear(d_model // 8, 1)
+        # self.trg_pitch_prj = nn.Linear(d_model * 3 // 4, PAD_IDX+1)
+        # self.trg_start_prj = nn.Linear(d_model // 8, 1)
+        # self.trg_end_prj = nn.Linear(d_model // 8, 1)
+        self.trg_pitch_prj = nn.Linear(d_model, PAD_IDX+1)
+        self.trg_start_prj = nn.Linear(d_model, 1)
+        self.trg_end_prj = nn.Linear(d_model, 1)
 
 
     def forward(self, mel, pitch, start, end):
@@ -69,10 +72,13 @@ class NoteTransformer(nn.Module):
         
         dec, *_ = self.decoder(trg_seq, trg_mask, enc)
 
-        pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
-        start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
+        pitch_out = self.trg_pitch_prj(dec)
+        start_out = self.trg_start_prj(dec)
+        end_out = self.trg_end_prj(dec)
+        # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
+        # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
         start_out = F.sigmoid(start_out)
-        end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
+        # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
         end_out = F.sigmoid(end_out)
         
         return pitch_out, start_out, end_out
