@@ -122,14 +122,14 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             seq_mask = (pitch_i == PAD_IDX)
-            start_loss = masked_l2(start_p, end_o, seq_mask)
+            start_loss = masked_l2(start_p, start_o, seq_mask)
             end_loss = masked_l2(end_p, end_o, seq_mask)
             loss = pitch_loss + start_loss + end_loss
             loss.backward()
             optimizer.step_and_update_lr()
 
             if step % output_interval == 0:
-                itr.set_description(f"pitch: {pitch_loss.item()}, start: {start_loss.item()}, end: {end_loss.item()}")
+                itr.set_description("pitch: %.2f, start: %.4f, end: %.4f" % (pitch_loss.item(), start_loss.item(), end_loss.item()))
 
             if step % summary_interval == 0:
                 sw.add_scalar("training/loss", loss.item(), step)
@@ -167,7 +167,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
                         pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                         seq_mask = (pitch_i == PAD_IDX)
-                        start_loss = masked_l2(start_p, end_o, seq_mask)
+                        start_loss = masked_l2(start_p, start_o, seq_mask)
                         end_loss = masked_l2(end_p, end_o, seq_mask)
                         loss = pitch_loss + start_loss + end_loss
 
@@ -178,8 +178,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             pred_list = get_list(pitch_p, start_p, end_p)
                             gt_list = get_list(pitch_o, start_o, end_o)
 
-                            # pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
-                            # gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
+                            pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
+                            gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
 
                             pred_list = pred_list[0]
                             gt_list = gt_list[0]
