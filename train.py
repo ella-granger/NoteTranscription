@@ -152,6 +152,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 model.eval()
                 with torch.no_grad():
                     total_loss = 0
+                    total_pitch_loss = 0
+                    total_start_loss = 0
+                    total_end_loss = 0
                     total_count = 0
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
@@ -171,7 +174,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         end_loss = masked_l2(end_p, end_o, seq_mask)
                         loss = pitch_loss + start_loss + end_loss
 
-                        if i < 3:
+                        if i < 1:
                             sw.add_figure("gt/%d" % i, plot_midi(pitch_o, start_o, end_o), step)
                             sw.add_figure("pred/%d" % i, plot_midi(pitch_p, start_p, end_p), step)
 
@@ -181,18 +184,27 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                             gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
 
-                            pred_list = pred_list[0]
-                            gt_list = gt_list[0]
+                            # pred_list = pred_list[0]
+                            # gt_list = gt_list[0]
 
                             sw.add_text("gt/%d" % i, str(gt_list), step)
                             sw.add_text("pred/%d" % i, str(pred_list), step)
                         
                         total_loss += loss.item()
+                        total_pitch_loss += pitch_loss.item()
+                        total_start_loss += start_loss.item()
+                        total_end_loss += end_loss.item()
                         total_count += 1
 
                 eval_loss = total_loss / total_count
+                eval_pitch_loss = total_pitch_loss / total_count
+                eval_start_loss = total_start_loss / total_count
+                eval_end_loss = total_end_loss / total_count
                 sw.add_scalar("eval/loss", eval_loss, step)
-                print(eval_loss)
+                sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
+                sw.add_scalar("eval/start_loss", eval_start_loss, step)
+                sw.add_scalar("eval/end_loss", eval_end_loss, step)
+                print(eval_loss, eval_pitch_loss, eval_start_loss, eval_end_loss)
                 model.train()
                 
             step += 1
