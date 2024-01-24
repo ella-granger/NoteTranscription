@@ -5,28 +5,70 @@ from sacred.observers import FileStorageObserver
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torch import optim
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
 from pathlib import Path
+import numpy as np
 from dataset.dataset import MelDataset
 from model import NoteTransformer
+from transformer.Optim import ScheduledOptim
 from tqdm import tqdm
+from dataset.constants import *
 
 ex = Experiment("train_transcriber")
 
 def patch_trg(trg):
-    gold = trg[:, 1:].contiguous().view(-1)
+    gold = trg[:, 1:].contiguous()
     trg = trg[:, :-1]
     return trg, gold
-    
+
+
+def masked_l2(pred, gt, mask):
+    diff = pred - gt.unsqueeze(-1)
+    loss = torch.sum(diff[mask.unsqueeze(-1)] ** 2)
+    return loss
+
+
+def plot_midi(pitch, start, end):
+    pitch, start, end = get_list(pitch, start, end)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    for n, s, e in zip(pitch, start, end):
+        if s <= e:
+            ax.hlines(n, s, e, linewidths=3)
+    fig.canvas.draw()
+    plt.close()
+    return fig
+
+
+def get_list(pitch, start, end):
+    pitch = pitch.detach().cpu().numpy()[0]
+    start = start.detach().cpu().numpy()[0]
+    end = end.detach().cpu().numpy()[0]
+
+    if len(pitch.shape) > 1:
+        pitch = np.argmax(pitch, axis=1, keepdims=False)
+        start = start.reshape(-1)
+        end = end.reshape(-1)
+
+    return pitch.tolist(), start.tolist(), end.tolist()
+
 
 @ex.config
 def config():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    output_interval = 5
+    summary_interval = 20
+    val_interval = 1000
+    checkpoint_interval = 5000
 
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, learning_rate_decay_steps,
-          clip_gradient_norm, epochs, data_path):
+          clip_gradient_norm, epochs, data_path,
+          output_interval, summary_interval, val_interval):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -55,10 +97,17 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             d_inner=512,
                             n_layers=n_layers)
     model = model.to(device)
-    model.train()
+
+    optimizer = ScheduledOptim(
+        optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
+        2.0, 256, 8000)
+
     
+    model.train()
+    step = 0
     for e in range(epochs):
-        for x in tqdm(train_loader):
+        itr = tqdm(train_loader)
+        for x in itr:
             mel = x["mel"].to(device)
             pitch = x["pitch"].to(device)
             start = x["start"].to(device)
@@ -68,12 +117,85 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             start_i, start_o = patch_trg(start)
             end_i, end_o = patch_trg(end)
 
+            optimizer.zero_grad()
             pitch_p, start_p, end_p = model(mel, pitch_i, start_i, end_i)
-            # print(pitch_p.size())
-            # print(start_p.size())
-            # print(end_p.size())
-            # _ = input()
-        _ = input()
+
+            pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
+            seq_mask = (pitch_i == PAD_IDX)
+            start_loss = masked_l2(start_p, end_o, seq_mask)
+            end_loss = masked_l2(end_p, end_o, seq_mask)
+            loss = pitch_loss + start_loss + end_loss
+            loss.backward()
+            optimizer.step_and_update_lr()
+
+            if step % output_interval == 0:
+                itr.set_description(f"pitch: {pitch_loss.item()}, start: {start_loss.item()}, end: {end_loss.item()}")
+
+            if step % summary_interval == 0:
+                sw.add_scalar("training/loss", loss.item(), step)
+                sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
+                sw.add_scalar("training/start_loss", start_loss.item(), step)
+                sw.add_scalar("training/end_loss", end_loss.item(), step)
+                sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
+
+            if step % checkpoint_interval == 0: # and step > 0:
+                checkpoint_path = logdir / "ckpt"
+                checkpoint_path.mkdir(exist_ok=True)
+                checkpoint_path = checkpoint_path / ("%08d" % step)
+                obj = {"model": model.state_dict(),
+                       "optim": optimizer._optimizer.state_dict(),
+                       "steps": step,
+                       "epoch": e}
+                torch.save(obj, str(checkpoint_path))
+
+            if step % val_interval == 0:
+                model.eval()
+                with torch.no_grad():
+                    total_loss = 0
+                    total_count = 0
+                    for i, batch in tqdm(enumerate(eval_loader)):
+                        mel = batch["mel"].to(device)
+                        pitch = batch["pitch"].to(device)
+                        start = batch["start"].to(device)
+                        end = batch["end"].to(device)
+
+                        pitch_i, pitch_o = patch_trg(pitch)
+                        start_i, start_o = patch_trg(start)
+                        end_i, end_o = patch_trg(end)
+
+                        pitch_p, start_p, end_p = model(mel, pitch_i, start_i, end_i)
+
+                        pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
+                        seq_mask = (pitch_i == PAD_IDX)
+                        start_loss = masked_l2(start_p, end_o, seq_mask)
+                        end_loss = masked_l2(end_p, end_o, seq_mask)
+                        loss = pitch_loss + start_loss + end_loss
+
+                        if i < 3:
+                            sw.add_figure("gt/%d" % i, plot_midi(pitch_o, start_o, end_o), step)
+                            sw.add_figure("pred/%d" % i, plot_midi(pitch_p, start_p, end_p), step)
+
+                            pred_list = get_list(pitch_p, start_p, end_p)
+                            gt_list = get_list(pitch_o, start_o, end_o)
+
+                            # pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
+                            # gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
+
+                            pred_list = pred_list[0]
+                            gt_list = gt_list[0]
+
+                            sw.add_text("gt/%d" % i, str(gt_list), step)
+                            sw.add_text("pred/%d" % i, str(pred_list), step)
+                        
+                        total_loss += loss.item()
+                        total_count += 1
+
+                eval_loss = total_loss / total_count
+                sw.add_scalar("eval/loss", eval_loss, step)
+                print(eval_loss)
+                model.train()
+                
+            step += 1
 
             
             
