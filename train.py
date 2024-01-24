@@ -121,7 +121,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             pitch_p, start_p, end_p = model(mel, pitch_i, start_i, end_i)
 
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
-            seq_mask = (pitch_i == PAD_IDX)
+            seq_mask = (pitch_i != PAD_IDX)
             start_loss = masked_l2(start_p, start_o, seq_mask)
             end_loss = masked_l2(end_p, end_o, seq_mask)
             loss = pitch_loss + start_loss + end_loss
@@ -166,7 +166,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         pitch_p, start_p, end_p = model(mel, pitch_i, start_i, end_i)
 
                         pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
-                        seq_mask = (pitch_i == PAD_IDX)
+                        seq_mask = (pitch_i != PAD_IDX)
                         start_loss = masked_l2(start_p, start_o, seq_mask)
                         end_loss = masked_l2(end_p, end_o, seq_mask)
                         loss = pitch_loss + start_loss + end_loss
