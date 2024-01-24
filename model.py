@@ -1,8 +1,32 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_mask
 from dataset.constants import *
+
+
+class TimeEncoding(nn.Module):
+
+    def __init__(self, d_hid):
+        super(TimeEncoding, self).__init__()
+
+        self.d_hid = d_hid
+
+
+    def forward(self, x):
+        # x: (B, L, 1) ~ (0, 1)
+        enc = 200 * x
+        enc = enc.repeat(1, 1, self.d_hid)
+
+        for j in range(self.d_hid):
+            div = np.power(10000, 2 * (j // 2) / self.d_hid)
+            enc[:, :, j] = enc[:, :, j] / div
+
+        enc[:, :, 0::2] = torch.sin(enc[:, :, 0::2])
+        enc[:, :, 1::2] = torch.cos(enc[:, :, 1::2])
+
+        return enc
 
 
 class NoteTransformer(nn.Module):
@@ -34,8 +58,9 @@ class NoteTransformer(nn.Module):
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model * 3 // 4, padding_idx=PAD_IDX)
-        self.start_prj = nn.Linear(1, d_model // 8)
-        self.end_prj = nn.Linear(1, d_model // 8)
+        self.time_enc = TimeEncoding(d_model // 8)
+        # self.start_prj = nn.Linear(1, d_model // 8)
+        # self.end_prj = nn.Linear(1, d_model // 8)
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
                                n_head=N_HEAD,
@@ -66,8 +91,10 @@ class NoteTransformer(nn.Module):
         end = torch.unsqueeze(end, -1)
 
         pitch = self.trg_pitch_emb(pitch)
-        start = self.start_prj(start)
-        end = self.end_prj(end)
+        # start = self.start_prj(start)
+        # end = self.end_prj(end)
+        start = self.time_enc(start)
+        end = self.time_enc(end)
         trg_seq = torch.cat([pitch, start, end], dim=-1)
         
         dec, *_ = self.decoder(trg_seq, trg_mask, enc)

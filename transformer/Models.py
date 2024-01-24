@@ -100,7 +100,7 @@ class Decoder(nn.Module):
         d_k = d_model // n_head
         d_v = d_model // n_head
 
-        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        # self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -118,7 +118,8 @@ class Decoder(nn.Module):
         dec_output = trg_seq
         if self.scale_emb:
             dec_output *= self.d_model ** 0.5
-        dec_output = self.dropout(self.position_enc(dec_output))
+        # dec_output = self.dropout(self.position_enc(dec_output))
+        dec_output = self.dropout(dec_output)
         dec_output = self.layer_norm(dec_output)
 
         for dec_layer in self.layer_stack:
