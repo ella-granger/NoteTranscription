@@ -166,6 +166,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_pitch_loss = 0
                     total_start_loss = 0
                     total_end_loss = 0
+                    total_T = 0
+                    total_C = 0
                     total_count = 0
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
@@ -199,12 +201,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                             gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
 
-                            # pred_list = pred_list[0]
-                            # gt_list = gt_list[0]
-
                             sw.add_text("gt/%d" % i, str(gt_list), step)
                             sw.add_text("pred/%d" % i, str(pred_list), step)
-                        
+
+                        pitch_pred = torch.argmax(pitch_p, dim=-1)
+                        total_T += torch.sum(pitch_pred == pitch_o).item()
+                        total_C += pitch_pred.size(1)
                         total_loss += loss.item()
                         total_pitch_loss += pitch_loss.item()
                         total_start_loss += start_loss.item()
@@ -219,7 +221,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
                 sw.add_scalar("eval/start_loss", eval_start_loss, step)
                 sw.add_scalar("eval/end_loss", eval_end_loss, step)
-                print(eval_loss, eval_pitch_loss, eval_start_loss, eval_end_loss)
+                sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
+                print(eval_loss, eval_pitch_loss, eval_start_loss, eval_end_loss, total_T / total_C)
                 model.train()
                 
             step += 1
