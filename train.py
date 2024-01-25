@@ -15,6 +15,7 @@ from model import NoteTransformer
 from transformer.Optim import ScheduledOptim
 from tqdm import tqdm
 from dataset.constants import *
+from utils import *
 
 ex = Experiment("train_transcriber")
 
@@ -34,31 +35,6 @@ def masked_l2(pred, gt, mask):
     diff = pred - gt.unsqueeze(-1)
     loss = torch.sum(diff[mask.unsqueeze(-1)] ** 2)
     return loss
-
-
-def plot_midi(pitch, start, end):
-    pitch, start, end = get_list(pitch, start, end)
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    for n, s, e in zip(pitch, start, end):
-        if s <= e:
-            ax.hlines(n, s, e, linewidths=3)
-    fig.canvas.draw()
-    plt.close()
-    return fig
-
-
-def get_list(pitch, start, end):
-    pitch = pitch.detach().cpu().numpy()[0]
-    start = start.detach().cpu().numpy()[0]
-    end = end.detach().cpu().numpy()[0]
-
-    if len(pitch.shape) > 1:
-        pitch = np.argmax(pitch, axis=1, keepdims=False)
-        start = start.reshape(-1)
-        end = end.reshape(-1)
-
-    return pitch.tolist(), start.tolist(), end.tolist()
 
 
 @ex.config
