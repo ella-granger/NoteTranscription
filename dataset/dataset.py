@@ -75,7 +75,10 @@ class MelDataset(torch.utils.data.Dataset):
             pitch = [x[0] for x in cur_note_list]
             start = [x[3] for x in cur_note_list]
             end = [x[4] for x in cur_note_list]
-            pitch.append(MAX_MIDI+1)
+            pitch.insert(MAX_MIDI+1)
+            start.insert(begin_time)
+            end.insert(begin_time)
+            pitch.append(MAX_MIDI+2)
             start.append(max(end))
             end.append(max(end))
             
