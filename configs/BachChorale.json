@@ -1,16 +1,16 @@
 {
-    "logdir": "runs/large_time_loss_time_enc",
+    "logdir": "runs/good_time_loss_layers_2_warmup_8000",
 
     "n_layers": 2,
 
     "batch_size": 2,
 
     "learning_rate": 0.0001,
-    "learning_rate_decay_steps": 10000,
+    "warmup_steps": 8000,
     "clip_gradient_norm": false,
-    "epochs": 100,
+    "epochs": 1000,
     "loss_norm": 1,
-    "time_loss_alpha": 10,
+    "time_loss_alpha": 20,
 
     "data_path": "dataset/test/BachChorale"
 }
