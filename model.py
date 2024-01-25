@@ -109,3 +109,52 @@ class NoteTransformer(nn.Module):
         end_out = F.sigmoid(end_out)
         
         return pitch_out, start_out, end_out
+
+
+    def predict(self, mel):
+        device = mel.device
+        mel = self.cnn(mel)
+        mel = torch.permute(mel, (0, 2, 1))
+
+        enc, *_ = self.encoder(mel)
+
+        MAX_LEN = 100
+        pitch = torch.zeros((1, MAX_LEN), dtype=int).to(device)
+        start = torch.zeros((1, MAX_LEN, 1), dtype=float).to(device)
+        end = torch.zeros((1, MAX_LEN, 1), dtype=float).to(device)
+        mask = torch.zeros((1, 1, MAX_LEN), dtype=bool).to(device)
+        pitch[:, :, 0] = INI_IDX
+
+        for i in range(MAX_LEN):
+            mask[:, :, i] = True
+
+            pitch_emb = self.trg_pitch_emb(pitch)
+            start_emb = self.time_enc(start)
+            end_emb = self.time_end(end)
+
+            trg_seq = torch.cat([pitch_emb, start_emb, end_emb], dim=-1)
+
+            dec, *_ = self.decoder(trg_seq, mask, enc)
+
+            pitch_out = self.trg_pitch_prj(dec)
+            start_out = self.trg_start_prj(dec)
+            end_out = self.trg_end_prj(dec)
+
+            start_out = F.sigmoid(start_out)
+            end_out = F.sigmoid(end_out)
+
+            pitch_pred = torch.argmax(pitch_out[:, i, :])
+            if pitch_pred.item() == END_IDX:
+                break
+
+            pitch[:, i+1] = pitch_pred
+            start[:, i+1, 0] = start_out[:, i, 0]
+            end[:, i+1, 0] = end_out[:, i, 0]
+
+        pitch = pitch[:, 1:i]
+        start = start[:, 1:i, 0]
+        end = end[:, 1:i, 0]
+
+        return pitch, start, end
+            
+        
