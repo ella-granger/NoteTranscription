@@ -68,11 +68,12 @@ def config():
     summary_interval = 20
     val_interval = 1000
     checkpoint_interval = 5000
+    warmup_steps = 8000
 
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
-          learning_rate, learning_rate_decay_steps,
+          learning_rate, warmup_steps,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha):
@@ -107,7 +108,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
     optimizer = ScheduledOptim(
         optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
-        2.0, 256, 8000)
+        2.0, 256, warmup_steps)
 
     
     model.train()
