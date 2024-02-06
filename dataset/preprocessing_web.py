@@ -119,16 +119,18 @@ if __name__ == "__main__":
     # target_dir = Path("/storageSSD/huiran/NoteTranscription")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/midi_align")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
-    target_dir = Path("./test")
-    content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset/program_change_midi")
+    # target_dir = Path("./test")
+    # content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset/program_change_midi")
+    content_dir = Path("/storageSSD/huiran/WebChoralDataset")
+    target_dir = Path("/storageSSD/huiran/WebChoralDataset/note_prep")
     
-    # mel_dir = target_dir / "BachChorale" / "mel"
-    note_dir = target_dir / "WebChorale" / "note"
-    # mel_dir.mkdir(parents=True, exist_ok=True)
+    mel_dir = target_dir / "mel"
+    note_dir = target_dir / "note"
+    mel_dir.mkdir(parents=True, exist_ok=True)
     note_dir.mkdir(parents=True, exist_ok=True)
     
     # flac_list = list(content_dir.glob("*.WAV"))
-    midi_list = list(content_dir.glob("*/*/*.mid"))
+    midi_list = list((content_dir / "program_change_midi").glob("*.mid"))
 
     valid = 0
     # for flac in tqdm(flac_list):
@@ -148,7 +150,8 @@ if __name__ == "__main__":
             pickle.dump(track_note_list, fout, protocol=4)
 
             
-        """
+        # """
+        flac = content_dir / "OneSong" / ("%s.flac" % midi_path.stem)
         wave, sr = torchaudio.load(flac)
         wave_mono = wave.mean(dim=0)
         if sr != SAMPLE_RATE:
@@ -167,7 +170,7 @@ if __name__ == "__main__":
         with open(mel_dir / ("%s.pkl" % flac.stem), 'wb') as fout:
             pickle.dump(mel_spec, fout, protocol=4)
 
-        """
+        # """
 
         # break
         # _ = input()
