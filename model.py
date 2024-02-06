@@ -120,17 +120,17 @@ class NoteTransformer(nn.Module):
 
         MAX_LEN = 100
         pitch = torch.zeros((1, MAX_LEN), dtype=int).to(device)
-        start = torch.zeros((1, MAX_LEN, 1), dtype=float).to(device)
-        end = torch.zeros((1, MAX_LEN, 1), dtype=float).to(device)
+        start = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
+        end = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
         mask = torch.zeros((1, 1, MAX_LEN), dtype=bool).to(device)
-        pitch[:, :, 0] = INI_IDX
+        pitch[:, 0] = INI_IDX
 
         for i in range(MAX_LEN):
             mask[:, :, i] = True
 
             pitch_emb = self.trg_pitch_emb(pitch)
             start_emb = self.time_enc(start)
-            end_emb = self.time_end(end)
+            end_emb = self.time_enc(end)
 
             trg_seq = torch.cat([pitch_emb, start_emb, end_emb], dim=-1)
 
