@@ -101,20 +101,41 @@ def convert_midi(midi_path):
         track_note_list.append(bar_note_list)
         track_note_dict[track.name] = track_note_list
 
-    for instrument in midi_data.instrument:
+
+    def idt(n1, n2):
+        if n2 == -1:
+            return False
+        if n1.pitch != n2.pitch:
+            return False
+        if n1.start < n2.start:
+            return False
+        if n1.end > n2.end:
+            return False
+        return True
+
+
+    for instrument in midi_data.instruments:
         if instrument.name[0] not in valid_list:
             continue
         track_note_list = track_note_dict[instrument.name]
         pm_notes = instrument.notes
-        assert len(pm_notes) = sum([len(x) for x in track_note_list])
+        # assert len(pm_notes) == sum([len(x) for x in track_note_list])
+        # print([x.pitch for x in pm_notes[:48]])
+        # print(track_note_list[:15])
 
         i = 0
+        prev_n = -1
         for bar in track_note_list:
             for note in bar:
+                while idt(pm_notes[i], prev_n):
+                    i += 1
                 n = pm_notes[i]
+                # print(i, n, note, prev_n)
                 assert note[0] == n.pitch
                 note.append(n.start)
                 note.append(n.end)
+                i += 1
+                prev_n = n
         
 
     final_bar_count = max([len(x) for _, x in track_note_dict.items()])
@@ -137,8 +158,8 @@ if __name__ == "__main__":
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
     # target_dir = Path("./test")
     # content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset/program_change_midi")
-    content_dir = Path("/storageSSD/huiran/WebChoralDataset")
-    target_dir = Path("/storageSSD/huiran/WebChoralDataset/note_prep")
+    content_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
+    target_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
     
     mel_dir = target_dir / "mel"
     note_dir = target_dir / "note"
@@ -146,11 +167,13 @@ if __name__ == "__main__":
     note_dir.mkdir(parents=True, exist_ok=True)
     
     # flac_list = list(content_dir.glob("*.WAV"))
-    midi_list = list((content_dir / "program_change_midi").glob("*.mid"))
+    midi_list = list((content_dir / "aligned_midi").glob("*.mid"))
 
     valid = 0
     # for flac in tqdm(flac_list):
-    for midi_path in tqdm(midi_list):
+    for j, midi_path in tqdm(enumerate(midi_list)):
+        if j < 79:
+            continue
         # midi_path = content_dir / ("%s.mid" % flac.stem)
         if not midi_path.exists():
             continue
@@ -167,7 +190,7 @@ if __name__ == "__main__":
 
             
         # """
-        flac = content_dir / "OneSong" / ("%s.flac" % midi_path.stem)
+        flac = content_dir / "aligned_midi" / ("%s.flac" % midi_path.stem)
         wave, sr = torchaudio.load(flac)
         wave_mono = wave.mean(dim=0)
         if sr != SAMPLE_RATE:
