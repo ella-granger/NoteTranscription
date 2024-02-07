@@ -1,4 +1,4 @@
-# import pretty_midi
+import pretty_midi
 from pathlib import Path
 import pickle
 from math import floor
@@ -16,7 +16,7 @@ duration = {}
 
 def convert_midi(midi_path):
     print(midi_path)
-    # midi_data = pretty_midi.PrettyMIDI(str(midi_path))
+    midi_data = pretty_midi.PrettyMIDI(str(midi_path))
     mid = MidiFile(str(midi_path))
     ticks_per_beat = mid.ticks_per_beat
 
@@ -100,6 +100,22 @@ def convert_midi(midi_path):
                         
         track_note_list.append(bar_note_list)
         track_note_dict[track.name] = track_note_list
+
+    for instrument in midi_data.instrument:
+        if instrument.name[0] not in valid_list:
+            continue
+        track_note_list = track_note_dict[instrument.name]
+        pm_notes = instrument.notes
+        assert len(pm_notes) = sum([len(x) for x in track_note_list])
+
+        i = 0
+        for bar in track_note_list:
+            for note in bar:
+                n = pm_notes[i]
+                assert note[0] == n.pitch
+                note.append(n.start)
+                note.append(n.end)
+        
 
     final_bar_count = max([len(x) for _, x in track_note_dict.items()])
     final_measure_list = [dict() for _ in range(final_bar_count)]
