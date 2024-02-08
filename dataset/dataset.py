@@ -10,10 +10,11 @@ from dataset.constants import *
 
 
 class MelDataset(torch.utils.data.Dataset):
-    def __init__(self, mel_dir, note_dir, id_json,
+    def __init__(self, mel_dir, note_dir, id_json, train_mode,
                  shuffle=True, device="cpu"):
         super().__init__()
 
+        self.train_mode = train_mode
         self.seg_len = SEG_LEN
         self.shuffle = shuffle
         self.device = device
@@ -94,8 +95,12 @@ class MelDataset(torch.utils.data.Dataset):
             # print(cur_bar_list)
             voice_list = ["S", "A", "T", "B"]
             token = []
-            start = []
-            dur = []
+            if "S" in self.train_mode:
+                start = []
+                dur = []
+            if "T" in self.train_mode:
+                start_t = []
+                end = []
             for bar in cur_bar_list:
                 full = True
                 for part in voice_list:
@@ -116,72 +121,102 @@ class MelDataset(torch.utils.data.Dataset):
                     for idx, note in enumerate(part_list):
                         if note[3] < end_time and note[4] >= begin_time:
                             token.append(note[0])
-                            start.append(note[1])
-                            dur.append(note[2])
+                            if "S" in self.train_mode:
+                                start.append(note[1])
+                                dur.append(note[2])
+                            if "T" in self.train_mode:
+                                start_t.append(note[3])
+                                end.append(note[4])
                             if note in last_list:
                                 last_count += 1
                     if last_count != len(last_list):
                         full = False
                 if full:
                     token.append(0)
-                    start.append(0.0)
-                    dur.append(0.0)
+                    if "S" in self.train_mode:
+                        start.append(0.0)
+                        dur.append(0.0)
+                    if "T" in self.train_mode:
+                        start_t.append(0.0)
+                        end.append(0.0)
             # print(token)
             # print(start)
             # print(dur)
             
-            token.insert(0, MAX_MIDI+1)
-            start.insert(0, 0.0)
-            dur.insert(0, 0.0)
-            token.append(MAX_MIDI+1)
-            start.append(0.0)
-            dur.append(0.0)
-
-            start = np.array(start) / 0.25
-            dur = np.array(dur) / 0.25
-
-            start = start.astype(int)
-            dur = dur.astype(int)
-            
-            token = torch.LongTensor(token)
-            start = torch.LongTensor(start)
-            dur = torch.LongTensor(dur)
-
-            token[token>0] = token[token>0] - MIN_MIDI + 1
-            dur = torch.clip(dur, 0, MAX_DUR)
-
             mel = mel[:, begin_idx:end_idx]
-        
-        
-        data_point = dict(mel=mel,
-                          pitch=token,
-                          start=start,
-                          dur=dur)
+            token.insert(0, MAX_MIDI+1)
+            token.append(MAX_MIDI+1)
+            token = torch.LongTensor(token)
+            token[token>0] = token[token>0] - MIN_MIDI + 1
+
+            if "S" in self.train_mode:
+                start.insert(0, 0.0)
+                dur.insert(0, 0.0)
+                start.append(0.0)
+                dur.append(0.0)
+
+                start = np.array(start) / 0.25
+                dur = np.array(dur) / 0.25
+
+                start = start.astype(int)
+                dur = dur.astype(int)
+                
+                start = torch.LongTensor(start)
+                dur = torch.LongTensor(dur)
+                dur = torch.clip(dur, 0, MAX_DUR)
+                
+            if "T" in self.train_mode:
+                start_t = torch.FloatTensor(start_t)
+                end = torch.FloatTensor(end)
+
+                start_t = (start_t - begin_time) / (end_time - begin_time)
+                end_t = (end - begin_time) / (end_time - begin_time)
+
+                start_t = torch.clip(start_t, 0.0, 1.0)
+                end = torch.clip(end, 0.0, 1.0)
+
+        if self.train_mode == "S":
+            data_point = dict(mel=mel,
+                              pitch=token,
+                              start=start,
+                              dur=dur)
+        elif self.train_mode == "T":
+            data_point = dict(mel=mel,
+                              pitch=token,
+                              start_t=start_t,
+                              end=end)
+        else:
+            data_point = dict(mel=mel,
+                              start=start,
+                              dur=dur,
+                              start_t=start_t,
+                              end=end)
         return data_point
 
 
     def collate_fn(self, batch):
 
+        pad_dict = {"pitch": PAD_IDX,
+                    "start": MAX_START+1,
+                    "dur": 0,
+                    "start_t": 0.0,
+                    "end": 0.0}
+
         def pad_and_stack(x_list, pad):
             max_len = max([len(x) for x in x_list])
             x_list = [F.pad(x, (0, max_len - len(x)), value=pad) for x in x_list]
             return torch.stack(x_list)
-        
-        mel = [x["mel"] for x in batch]
-        pitch = [x["pitch"] for x in batch]
-        start = [x["start"] for x in batch]
-        dur = [x["dur"] for x in batch]
 
-        mel = torch.stack(mel)
+        result = {}
+        result["mel"] = torch.stack([x["mel"] for x in batch])
 
-        pitch = pad_and_stack(pitch, PAD_IDX)
-        start = pad_and_stack(start, MAX_START+1)
-        dur = pad_and_stack(dur, 0)
+        for key in pad_dict:
+            if key in batch[0]:
+                v = [x[key] for x in batch]
+                v = pad_and_stack(v, pad_dict[key])
+                result[key] = v
 
-        return dict(mel=mel,
-                    pitch=pitch,
-                    start=start,
-                    dur=dur)
+        return result
             
 
     def get_length(self, mel, note):

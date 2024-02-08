@@ -45,6 +45,7 @@ def config():
     val_interval = 1000
     checkpoint_interval = 5000
     warmup_steps = 8000
+    train_mode = "TS"
 
 
 @ex.automain
@@ -52,7 +53,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, warmup_steps,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
-          loss_norm, time_loss_alpha):
+          loss_norm, time_loss_alpha, train_mode):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -64,11 +65,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     train_data = MelDataset(data_path / "mel",
                             data_path / "note",
                             data_path / "train.json",
+                            train_mode,
                             device=device)
 
     valid_data = MelDataset(data_path / "mel",
                             data_path / "note",
                             data_path / "valid.json",
+                            train_mode,
                             device=device)
 
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=False,
@@ -79,7 +82,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     model = NoteTransformer(kernel_size=9,
                             d_model=256,
                             d_inner=512,
-                            n_layers=n_layers)
+                            n_layers=n_layers,
+                            train_mode=train_mode)
     model = model.to(device)
 
     optimizer = ScheduledOptim(
@@ -94,20 +98,51 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         for x in itr:
             mel = x["mel"].to(device)
             pitch = x["pitch"].to(device)
-            start = x["start"].to(device)
-            dur = x["dur"].to(device)
+
+            start = None
+            dur = None
+            start_t = None
+            end = None
+            if "S" in train_mode:
+                start = x["start"].to(device)
+                dur = x["dur"].to(device)
+            if "T" in train_mode:
+                start_t = x["start_t"].to(device)
+                end = x["end"].to(device)
 
             pitch_i, pitch_o = patch_trg(pitch)
-            start_i, start_o = patch_trg(start)
-            dur_i, dur_o = patch_trg(dur)
+            if "S" in train_mode:
+                start_i, start_o = patch_trg(start)
+                dur_i, dur_o = patch_trg(dur)
+            if "T" in train_mode:
+                start_t_i, start_t_o = patch_trg(start_t)
+                end_i, end_o = patch_trg(end)
 
             optimizer.zero_grad()
-            pitch_p, start_p, dur_p = model(mel, pitch_i, start_i, dur_i)
+            result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
 
+            if train_mode == "S":
+                pitch_p, start_p, dur_p = result
+            elif train_mode == "T":
+                pitch_p, start_t_p, end_p = result
+            else:
+                pitch_p, start_p, dur_p, start_t_p, end_p = result
+
+            start_loss = 0
+            dur_loss = 0
+            start_t_loss = 0
+            end_loss = 0
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
-            start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
-            dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
-            loss = pitch_loss + start_loss + dur_loss
+            if "S" in train_mode:
+                start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
+                dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
+            if "T" in train_mode:
+                seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
+
+                start_t_loss = time_loss_alpha * masked_l1(start_t_p, start_t_o, seq_mask)
+                end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
+            
+            loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
             loss.backward()
             optimizer.step_and_update_lr()
 
@@ -117,8 +152,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             if step % summary_interval == 0:
                 sw.add_scalar("training/loss", loss.item(), step)
                 sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
-                sw.add_scalar("training/start_loss", start_loss.item(), step)
-                sw.add_scalar("training/dur_loss", dur_loss.item(), step)
+                if "S" in train_mode:
+                    sw.add_scalar("training/start_loss", start_loss.item(), step)
+                    sw.add_scalar("training/dur_loss", dur_loss.item(), step)
+                if "T" in train_mode:
+                    sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
+                    sw.add_scalar("training/end_loss", end_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
 
             if step % checkpoint_interval == 0: # and step > 0:
@@ -139,39 +178,87 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_start_loss = 0
                     total_dur_loss = 0
                     total_T = 0
+                    total_start_T = 0
+                    total_dur_T = 0
                     total_C = 0
                     total_count = 0
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
                         pitch = batch["pitch"].to(device)
-                        start = batch["start"].to(device)
-                        dur = batch["dur"].to(device)
+
+                        start = None
+                        dur = None
+                        start_t = None
+                        end = None
+                        if "S" in train_mode:
+                            start = batch["start"].to(device)
+                            dur = batch["dur"].to(device)
+                        if "T" in train_mode:
+                            start_t = batch["start_t"].to(device)
+                            end = batch["end"].to(device)
 
                         pitch_i, pitch_o = patch_trg(pitch)
-                        start_i, start_o = patch_trg(start)
-                        dur_i, dur_o = patch_trg(dur)
+                        if "S" in train_mode:
+                            start_i, start_o = patch_trg(start)
+                            dur_i, dur_o = patch_trg(dur)
+                        if "T" in train_mode:
+                            start_t_i, start_t_o = patch_trg(start_t)
+                            end_i, end_o = patch_trg(end)
 
-                        pitch_p, start_p, dur_p = model(mel, pitch_i, start_i, dur_i)
+                        result = model(mel, pitch_i, start_i, dur_i)
+                        if train_mode == "S":
+                            pitch_p, start_p, dur_p = result
+                        elif train_mode == "T":
+                            pitch_p, start_t_p, end_p = result
+                        else:
+                            pitch_p, start_p, dur_p, start_t_p, end_p = result
 
+                        start_loss = 0
+                        dur_loss = 0
+                        start_t_loss = 0
+                        end_loss = 0
                         pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
-                        start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
-                        dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
-                        loss = pitch_loss + start_loss + dur_loss
+                        if "S" in train_mode:
+                            start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
+                            dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
+                        if "T" in train_mode:
+                            seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
+
+                            start_t_loss = time_loss_alpha * masked_l1(start_t_p, start_t_o, seq_mask)
+                            end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
+            
+                        loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
 
                         if i < 1:
-                            # sw.add_figure("gt/%d" % i, plot_midi(pitch_o, start_o, dur_o), step)
-                            # sw.add_figure("pred/%d" % i, plot_midi(pitch_p, start_p, dur_p), step)
 
-                            pred_list = get_list(pitch_p, start_p, dur_p)
-                            gt_list = get_list(pitch_o, start_o, dur_o)
+                            if "S" in train_mode:
+                                pred_list = get_list_s(pitch_p, start_p, dur_p)
+                                gt_list = get_list_s(pitch_o, start_o, dur_o)
+                                
+                                pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
+                                gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
 
-                            pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
-                            gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
+                                sw.add_text("gt/s_%d" % i, str(gt_list), step)
+                                sw.add_text("pred/s_%d" % i, str(pred_list), step)
+                            if "T" in train_mode:
+                                pred_list = get_list_t(pitch_p, start_t_p, end_p)
+                                gt_list = get_list_t(pitch_o, start_t_o, end_o)
 
-                            sw.add_text("gt/%d" % i, str(gt_list), step)
-                            sw.add_text("pred/%d" % i, str(pred_list), step)
+                                pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
+                                gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
+
+                                sw.add_text("gt/t_%d" % i, str(gt_list), step)
+                                sw.add_text("pred/t_%d" % i, str(pred_list), step)
+                                
+                                sw.add_figure("gt/%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
+                                sw.add_figure("pred/%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)
+                        if "S" in train_mode:
+                            start_pred = torch.argmax(start_p, dim=-1)
+                            dur_pred = torch.argmax(dur_p, dim=-1)
+                            total_start_T += torch.sum(start_pred == start_o).item()
+                            total_dur_T += torch.sum(dur_pred == dur_o).item()
                         total_T += torch.sum(pitch_pred == pitch_o).item()
                         total_C += pitch_pred.size(1)
                         total_loss += loss.item()
@@ -189,7 +276,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 sw.add_scalar("eval/start_loss", eval_start_loss, step)
                 sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
                 sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
-                print(eval_loss, eval_pitch_loss, eval_start_loss, eval_dur_loss, total_T / total_C)
+                if "S" in train_mode:
+                    sw.add_scalar("eval/start_prec", total_start_T / total_C, step)
+                    sw.add_scalar("eval/dur_prec", total_dur_T / total_C, step)
+                print(eval_loss, total_T / total_C)
                 model.train()
                 
             step += 1
