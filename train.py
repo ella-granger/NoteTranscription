@@ -99,10 +99,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             mel = x["mel"].to(device)
             pitch = x["pitch"].to(device)
 
-            start = None
-            dur = None
-            start_t = None
-            end = None
+            start_i = None
+            dur_i = None
+            start_t_i = None
+            end_i = None
             if "S" in train_mode:
                 start = x["start"].to(device)
                 dur = x["dur"].to(device)
@@ -126,7 +126,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             elif train_mode == "T":
                 pitch_p, start_t_p, end_p = result
             else:
-                pitch_p, start_p, dur_p, start_t_p, end_p = result
+                pitch_p, start_t_p, end_p, start_p, dur_p = result
 
             start_loss = 0
             dur_loss = 0
@@ -134,11 +134,15 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             end_loss = 0
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             if "S" in train_mode:
+                # print(start_p.size())
+                # print(dur_p.size())
+                # print(start_o)
+                # print(dur_o)
+                # _ = input()
                 start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                 dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
             if "T" in train_mode:
                 seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
-
                 start_t_loss = time_loss_alpha * masked_l1(start_t_p, start_t_o, seq_mask)
                 end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
             
@@ -147,7 +151,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             optimizer.step_and_update_lr()
 
             if step % output_interval == 0:
-                itr.set_description("pitch: %.2f, start: %.4f, dur: %.4f" % (pitch_loss.item(), start_loss.item(), dur_loss.item()))
+                itr.set_description("pitch: %.2f" % (pitch_loss.item()))
 
             if step % summary_interval == 0:
                 sw.add_scalar("training/loss", loss.item(), step)
@@ -177,6 +181,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_pitch_loss = 0
                     total_start_loss = 0
                     total_dur_loss = 0
+                    total_start_t_loss = 0
+                    total_end_loss = 0
                     total_T = 0
                     total_start_T = 0
                     total_dur_T = 0
@@ -186,10 +192,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         mel = batch["mel"].to(device)
                         pitch = batch["pitch"].to(device)
 
-                        start = None
-                        dur = None
-                        start_t = None
-                        end = None
+                        start_i = None
+                        dur_i = None
+                        start_t_i = None
+                        end_i = None
                         if "S" in train_mode:
                             start = batch["start"].to(device)
                             dur = batch["dur"].to(device)
@@ -205,13 +211,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             start_t_i, start_t_o = patch_trg(start_t)
                             end_i, end_o = patch_trg(end)
 
-                        result = model(mel, pitch_i, start_i, dur_i)
+                        result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
                         if train_mode == "S":
                             pitch_p, start_p, dur_p = result
                         elif train_mode == "T":
                             pitch_p, start_t_p, end_p = result
                         else:
-                            pitch_p, start_p, dur_p, start_t_p, end_p = result
+                            pitch_p, start_t_p, end_p, start_p, dur_p = result
 
                         start_loss = 0
                         dur_loss = 0
@@ -263,18 +269,28 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         total_C += pitch_pred.size(1)
                         total_loss += loss.item()
                         total_pitch_loss += pitch_loss.item()
-                        total_start_loss += start_loss.item()
-                        total_dur_loss += dur_loss.item()
+                        if "S" in train_mode:
+                            total_start_loss += start_loss.item()
+                            total_dur_loss += dur_loss.item()
+                        if "T" in train_mode:
+                            total_start_t_loss += start_t_loss.item()
+                            total_end_loss += end_loss.item()
                         total_count += 1
 
                 eval_loss = total_loss / total_count
                 eval_pitch_loss = total_pitch_loss / total_count
-                eval_start_loss = total_start_loss / total_count
-                eval_dur_loss = total_dur_loss / total_count
                 sw.add_scalar("eval/loss", eval_loss, step)
                 sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
-                sw.add_scalar("eval/start_loss", eval_start_loss, step)
-                sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
+                if "S" in train_mode:
+                    eval_start_loss = total_start_loss / total_count
+                    eval_dur_loss = total_dur_loss / total_count
+                    sw.add_scalar("eval/start_loss", eval_start_loss, step)
+                    sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
+                if "T" in train_mode:
+                    eval_start_t_loss = total_start_t_loss / total_count
+                    eval_end_loss = total_end_loss / total_count
+                    sw.add_scalar("eval/start_t_loss", eval_start_t_loss, step)
+                    sw.add_scalar("eval/end_loss", eval_end_loss, step)
                 sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
                 if "S" in train_mode:
                     sw.add_scalar("eval/start_prec", total_start_T / total_C, step)

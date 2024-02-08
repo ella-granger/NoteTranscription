@@ -4,7 +4,7 @@ import numpy as np
 
 def plot_midi(pitch, start, end):
     if type(pitch) != list:
-        pitch, start, end = get_list(pitch, start, end)
+        pitch, start, end = get_list_t(pitch, start, end)
 
     fig, ax = plt.subplots(figsize=(10, 4))
     for n, s, e in zip(pitch, start, end):
