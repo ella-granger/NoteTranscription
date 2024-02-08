@@ -5,8 +5,8 @@ import pickle
 import torch
 import torch.nn.functional as F
 import json
-# from dataset.constants import *
-from constants import *
+from dataset.constants import *
+# from constants import *
 
 
 class MelDataset(torch.utils.data.Dataset):

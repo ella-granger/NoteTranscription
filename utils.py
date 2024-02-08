@@ -22,7 +22,9 @@ def get_list(pitch, start, end):
 
     if len(pitch.shape) > 1:
         pitch = np.argmax(pitch, axis=1, keepdims=False)
-        start = start.reshape(-1)
-        end = end.reshape(-1)
+        start = np.argmax(start, axis=1, keepdims=False)
+        end = np.argmax(end, axis=1, keepdims=False)
+        # start = start.reshape(-1)
+        # end = end.reshape(-1)
 
     return pitch.tolist(), start.tolist(), end.tolist()

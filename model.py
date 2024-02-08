@@ -89,8 +89,8 @@ class NoteTransformer(nn.Module):
         # decoding
         trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
 
-        start = torch.unsqueeze(start, -1)
-        end = torch.unsqueeze(end, -1)
+        # start = torch.unsqueeze(start, -1)
+        # end = torch.unsqueeze(end, -1)
 
         pitch = self.trg_pitch_emb(pitch)
         start = self.trg_start_emb(start)
@@ -124,8 +124,8 @@ class NoteTransformer(nn.Module):
 
         MAX_LEN = 100
         pitch = torch.zeros((1, MAX_LEN), dtype=int).to(device)
-        start = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
-        end = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
+        start = torch.zeros((1, MAX_LEN), dtype=torch.float64).to(device)
+        end = torch.zeros((1, MAX_LEN), dtype=torch.float64).to(device)
         mask = torch.zeros((1, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
 
