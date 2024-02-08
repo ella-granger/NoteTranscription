@@ -57,8 +57,10 @@ class NoteTransformer(nn.Module):
                                scale_emb=True)
 
         # Decoder
-        self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model * 3 // 4, padding_idx=PAD_IDX)
-        self.time_enc = TimeEncoding(d_model // 8)
+        self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model // 2, padding_idx=PAD_IDX)
+        self.trg_start_emb = nn.Embedding(MAX_START+2, d_model // 4, padding_idx=MAX_START+1)
+        self.trg_end_emb = nn.Embedding(MAX_DUR+1, d_model // 4, padding_idx=0)
+        # self.time_enc = TimeEncoding(d_model // 8)
         # self.start_prj = nn.Linear(1, d_model // 8)
         # self.end_prj = nn.Linear(1, d_model // 8)
         self.decoder = Decoder(d_word_vec=d_model,
@@ -72,8 +74,8 @@ class NoteTransformer(nn.Module):
         # self.trg_start_prj = nn.Linear(d_model // 8, 1)
         # self.trg_end_prj = nn.Linear(d_model // 8, 1)
         self.trg_pitch_prj = nn.Linear(d_model, PAD_IDX+1)
-        self.trg_start_prj = nn.Linear(d_model, 1)
-        self.trg_end_prj = nn.Linear(d_model, 1)
+        self.trg_start_prj = nn.Linear(d_model, MAX_START+2)
+        self.trg_end_prj = nn.Linear(d_model, MAX_DUR+1)
 
 
     def forward(self, mel, pitch, start, end):
@@ -91,10 +93,12 @@ class NoteTransformer(nn.Module):
         end = torch.unsqueeze(end, -1)
 
         pitch = self.trg_pitch_emb(pitch)
+        start = self.trg_start_emb(start)
+        end = self.trg_end_emb(end)
         # start = self.start_prj(start)
         # end = self.end_prj(end)
-        start = self.time_enc(start)
-        end = self.time_enc(end)
+        # start = self.time_enc(start)
+        # end = self.time_enc(end)
         trg_seq = torch.cat([pitch, start, end], dim=-1)
         
         dec, *_ = self.decoder(trg_seq, trg_mask, enc)
@@ -104,9 +108,9 @@ class NoteTransformer(nn.Module):
         end_out = self.trg_end_prj(dec)
         # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
         # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-        start_out = F.sigmoid(start_out)
+        # start_out = F.sigmoid(start_out)
         # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
-        end_out = F.sigmoid(end_out)
+        # end_out = F.sigmoid(end_out)
         
         return pitch_out, start_out, end_out
 
@@ -140,8 +144,8 @@ class NoteTransformer(nn.Module):
             start_out = self.trg_start_prj(dec)
             end_out = self.trg_end_prj(dec)
 
-            start_out = F.sigmoid(start_out)
-            end_out = F.sigmoid(end_out)
+            # start_out = F.sigmoid(start_out)
+            # end_out = F.sigmoid(end_out)
 
             pitch_pred = torch.argmax(pitch_out[:, i, :])
             if pitch_pred.item() == END_IDX:

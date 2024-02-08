@@ -175,8 +175,8 @@ class MelDataset(torch.utils.data.Dataset):
         mel = torch.stack(mel)
 
         pitch = pad_and_stack(pitch, PAD_IDX)
-        start = pad_and_stack(start, 0.0)
-        dur = pad_and_stack(dur, 0.0)
+        start = pad_and_stack(start, MAX_START+1)
+        dur = pad_and_stack(dur, 0)
 
         return dict(mel=mel,
                     pitch=pitch,
