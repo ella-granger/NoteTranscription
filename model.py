@@ -104,17 +104,21 @@ class NoteTransformer(nn.Module):
             end = self.end_prj(end)
             # start = self.time_enc(start)
             # end = self.time_enc(end)
-
         pitch = self.trg_pitch_emb(pitch)
         if "S" in self.train_mode:
             start_s = self.trg_start_emb(start_s)
-            dur = self.trg_end_emb(dur)
+            dur = self.trg_dur_emb(dur)
 
         if self.train_mode == "T":
             trg_seq = torch.cat([pitch, start_t, end], dim=-1)
         elif self.train_mode == "S":
             trg_seq = torch.cat([pitch, start_s, dur], dim=-1)
         else:
+            # print(pitch.size())
+            # print(start_t.size())
+            # print(end.size())
+            # print(start_s.size())
+            # print(dur.size())
             trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
         
         dec, *_ = self.decoder(trg_seq, trg_mask, enc)
@@ -123,7 +127,7 @@ class NoteTransformer(nn.Module):
 
         if "S" in self.train_mode:
             start_s_out = self.trg_start_s_prj(dec)
-            dur_out = self.trg_end_prj(dec)
+            dur_out = self.trg_dur_s_prj(dec)
         if "T" in self.train_mode:
             start_t_out = self.trg_start_t_prj(dec)
             start_t_out = F.sigmoid(start_t_out)

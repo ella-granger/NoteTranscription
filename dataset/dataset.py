@@ -166,11 +166,21 @@ class MelDataset(torch.utils.data.Dataset):
                 dur = torch.clip(dur, 0, MAX_DUR)
                 
             if "T" in self.train_mode:
+                start_t.insert(0, begin_time)
+                if len(end) == 0:
+                    start_t.append(end_time)
+                else:
+                    start_t.append(max(end))
+                end.insert(0, begin_time)
+                if len(end) == 0:
+                    end.append(end_time)
+                else:
+                    end.append(max(end))
                 start_t = torch.FloatTensor(start_t)
                 end = torch.FloatTensor(end)
 
                 start_t = (start_t - begin_time) / (end_time - begin_time)
-                end_t = (end - begin_time) / (end_time - begin_time)
+                end = (end - begin_time) / (end_time - begin_time)
 
                 start_t = torch.clip(start_t, 0.0, 1.0)
                 end = torch.clip(end, 0.0, 1.0)
@@ -187,6 +197,7 @@ class MelDataset(torch.utils.data.Dataset):
                               end=end)
         else:
             data_point = dict(mel=mel,
+                              pitch=token,
                               start=start,
                               dur=dur,
                               start_t=start_t,
@@ -216,6 +227,8 @@ class MelDataset(torch.utils.data.Dataset):
                 v = pad_and_stack(v, pad_dict[key])
                 result[key] = v
 
+        # print(result)
+        # _ = input()
         return result
             
 
