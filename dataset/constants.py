@@ -5,7 +5,7 @@ HOP_LENGTH = 256
 PAD_MODE = "constant"
 N_MELS = 256
 MEL_EPSILON = 1e-8
-SEG_LEN = 320
+SEG_LEN = 640
 
 MIN_MIDI = 34
 MAX_MIDI = 89
@@ -16,3 +16,6 @@ INI_IDX = MRK_IDX
 EOS_IDX = MRK_IDX
 
 N_HEAD = 4
+
+MAX_START = round(6.0 / 0.25)
+MAX_DUR = round(12.0 / 0.25)
