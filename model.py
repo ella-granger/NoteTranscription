@@ -155,8 +155,10 @@ class NoteTransformer(nn.Module):
 
         MAX_LEN = 100
         pitch = torch.zeros((1, MAX_LEN), dtype=int).to(device)
-        start = torch.zeros((1, MAX_LEN), dtype=torch.float64).to(device)
-        end = torch.zeros((1, MAX_LEN), dtype=torch.float64).to(device)
+        start_t = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
+        end = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
+        start = torch.zeros((1, MAX_LEN), dtype=int).to(device)
+        dur = torch.zeros((1, MAX_LEN), dtype=int).to(device)
         mask = torch.zeros((1, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
 
@@ -164,32 +166,59 @@ class NoteTransformer(nn.Module):
             mask[:, :, i] = True
 
             pitch_emb = self.trg_pitch_emb(pitch)
-            start_emb = self.time_enc(start)
-            end_emb = self.time_enc(end)
+            if "T" in self.train_mode:
+                start_t_emb = self.start_prj(start_t)
+                end_emb = self.end_prj(end)
+            if "S" in self.train_mode:
+                start_emb = self.trg_start_emb(start)
+                dur_emb = self.trg_dur_emb(dur)
 
-            trg_seq = torch.cat([pitch_emb, start_emb, end_emb], dim=-1)
+            if self.train_mode == "T":
+                trg_seq = torch.cat([pitch_emb, start_t_emb, end_emb], dim=-1)
+            elif self.train_mode == "S":
+                trg_seq = torch.cat([pitch_emb, start_emb, dur_emb], dim=-1)
+            else:
+                trg_seq = torch.cat([pitch_emb, start_t_emb, end_emb, start_emb, dur_emb], dim=-1)
 
             dec, *_ = self.decoder(trg_seq, mask, enc)
 
             pitch_out = self.trg_pitch_prj(dec)
-            start_out = self.trg_start_prj(dec)
-            end_out = self.trg_end_prj(dec)
-
-            # start_out = F.sigmoid(start_out)
-            # end_out = F.sigmoid(end_out)
+            if "S" in self.train_mode:
+                start_out = self.trg_start_s_prj(dec)
+                dur_out = self.trg_dur_prj(dec)
+            if "T" in self.train_mode:
+                start_t_out = self.trg_start_t_prj(dec)
+                end_out = self.trg_end_prj(dec)
+                start_t_out = F.sigmoid(start_out)
+                end_out = F.sigmoid(end_out)
 
             pitch_pred = torch.argmax(pitch_out[:, i, :])
-            if pitch_pred.item() == END_IDX:
+            if pitch_pred.item() == EOS_IDX:
                 break
+            if "S" in self.train_mode:
+                start_pred = torch.argmax(start_out[:, i, :])
+                dur_pred = torch.argmax(dur_out[:, i, :])
 
             pitch[:, i+1] = pitch_pred
-            start[:, i+1, 0] = start_out[:, i, 0]
-            end[:, i+1, 0] = end_out[:, i, 0]
+            if "S" in self.train_mode:
+                start[:, i+1] = start_pred
+                dur[:, i+1] = dur_pred
+            if "T" in self.train_mode:
+                start_t[:, i+1, 0] = start_t_out[:, i, 0]
+                end[:, i+1, 0] = end_out[:, i, 0]
 
         pitch = pitch[:, 1:i]
-        start = start[:, 1:i, 0]
-        end = end[:, 1:i, 0]
+        if "S" in self.train_mode:
+            start = start[:, 1:i]
+            dur = dur[:, 1:i]
+        if "T" in self.train_mode:
+            start_t = start_t[:, 1:i, 0]
+            end = end[:, 1:i, 0]
 
-        return pitch, start, end
-            
+        if self.train_mode == "T":
+            return pitch_out, start_t_out, end_out
+        elif self.train_mode == "S":
+            return pitch_out, start_out, dur_out
+        else:
+            return pitch_out, start_t_out, end_out, start_out, dur_out
         
