@@ -19,14 +19,14 @@ def plot_score(pitch, start, dur):
     if type(pitch) != list:
         pitch, start, dur = get_list_s(pitch, start_dur)
 
-    fig.ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(10, 4))
     cur_bar = 0
     for n, s, d in zip(pitch, start, dur):
         if n != 0:
-            ax.hlines(n, start + cur_bar, start+dur+cur_bar, linewidths=3)
+            ax.hlines(n, s + cur_bar, s+d+cur_bar, linewidths=3)
         else:
             cur_bar += 16
-            ax.vlines(cur_bar)
+            ax.vlines(cur_bar, min(pitch), max(pitch))
 
     fig.canvas.draw()
     plt.close()

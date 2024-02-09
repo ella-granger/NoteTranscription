@@ -18,7 +18,7 @@ ex = Experiment("text_transcription")
 
 @ex.config
 def cfg():
-    ckpt_id = "00140000"
+    ckpt_id = "00375000"
 
 
 @ex.automain
@@ -77,16 +77,18 @@ def test(logdir, device, data_path, n_layers, ckpt_id,
                     pred_list = get_list_s(pitch_p, start_p, dur_p)
                     gt_list = get_list_s(pitch, start, dur)
                     fig_pred = plot_score(*pred_list)
-                    fig_pred.savefig("pred/pred_%d.png" % i)
+                    fig_pred.savefig("pred/pred_score_%d.png" % i)
                     fig_gt = plot_score(*gt_list)
-                    fig_gt.savefig("gt_%d.png" % i)
+                    fig_gt.savefig("pred/gt_score_%d.png" % i)
 
                 if "T" in train_mode:
                     pred_list = get_list_t(pitch_p, start_t_p, end_p)
                     gt_list = get_list_t(pitch, start_t, end)
                     
                     fig_pred = plot_midi(*pred_list)
-                    fig_pred.savefig("pred_%d.png" % i)
+                    fig_pred.savefig("pred/pred_trans_%d.png" % i)
                     fig_gt = plot_midi(*gt_list)
-                    fig_gt.savefig("gt_%d.png" % i)
+                    fig_gt.savefig("pred/gt_trans_%d.png" % i)
+            else:
+                break
     

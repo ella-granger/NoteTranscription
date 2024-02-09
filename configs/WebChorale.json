@@ -1,16 +1,18 @@
 {
-    "logdir": "runs/a2s_bach_layer2_ST",
+    "logdir": "runs/a2s_layer2_T",
 
     "n_layers": 2,
 
     "batch_size": 4,
 
     "learning_rate": 0.0001,
-    "warmup_steps": 8000,
+    "warmup_steps": 12000,
     "clip_gradient_norm": false,
     "epochs": 500,
     "loss_norm": 1,
     "time_loss_alpha": 20,
 
-    "data_path": "/storageSSD/huiran/NoteTranscription/BachChorale"
+    "train_mode": "T",
+
+    "data_path": "/storageSSD/huiran/NoteTranscription/WebChorale"
 }

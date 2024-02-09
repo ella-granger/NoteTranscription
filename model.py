@@ -157,7 +157,7 @@ class NoteTransformer(nn.Module):
 
         enc, *_ = self.encoder(mel)
 
-        MAX_LEN = 100
+        MAX_LEN = 800
         pitch = torch.zeros((1, MAX_LEN), dtype=int).to(device)
         start_t = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
         end = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
@@ -166,7 +166,7 @@ class NoteTransformer(nn.Module):
         mask = torch.zeros((1, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
 
-        for i in range(MAX_LEN):
+        for i in range(MAX_LEN-1):
             mask[:, :, i] = True
 
             pitch_emb = self.trg_pitch_emb(pitch)
@@ -189,7 +189,7 @@ class NoteTransformer(nn.Module):
             pitch_out = self.trg_pitch_prj(dec)
             if "S" in self.train_mode:
                 start_out = self.trg_start_s_prj(dec)
-                dur_out = self.trg_dur_prj(dec)
+                dur_out = self.trg_dur_s_prj(dec)
             if "T" in self.train_mode:
                 start_t_out = self.trg_start_t_prj(dec)
                 end_out = self.trg_end_prj(dec)
