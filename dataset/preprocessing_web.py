@@ -44,6 +44,8 @@ def convert_midi(midi_path):
         # _ = input()
     track_note_dict = {}
     for track in mid.tracks[1:]:
+        if track.name == "":
+            continue
         if track.name[0] not in valid_list:
             continue
         # print(track, track.name)
@@ -116,6 +118,8 @@ def convert_midi(midi_path):
 
 
     for instrument in midi_data.instruments:
+        if instrument.name == "":
+            continue
         if instrument.name[0] not in valid_list:
             continue
         track_note_list = track_note_dict[instrument.name]
@@ -153,8 +157,8 @@ def convert_midi(midi_path):
 
 
 if __name__ == "__main__":
-    # content_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale/BachChorale")
-    # target_dir = Path("/storageSSD/huiran/NoteTranscription")
+    content_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale")
+    target_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/midi_align")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
     # target_dir = Path("./test")
@@ -171,17 +175,17 @@ if __name__ == "__main__":
     note_dir.mkdir(parents=True, exist_ok=True)
     
     # flac_list = list(content_dir.glob("*.WAV"))
-    midi_list = list((content_dir / "aligned_midi").glob("*/*/*.mid"))
-    with open(content_dir / "split" / "aligned_midi" / "test.json") as fin:
-        test_list = json.load(fin)
-
-    midi_list = [x for x in midi_list if x.stem in test_list]
+    # midi_list = list((content_dir / "aligned_midi").glob("*/*/*.mid"))
+    # with open(content_dir / "split" / "aligned_midi" / "test.json") as fin:
+    #     test_list = json.load(fin)
+    # midi_list = [x for x in midi_list if x.stem in test_list]
+    
+    # midi_list = list((content_dir / "aligned_midi").glob("*.mid"))
+    midi_list = list((content_dir / "BachChorale").glob("*.mid"))
 
     valid = 0
     # for flac in tqdm(flac_list):
     for j, midi_path in tqdm(enumerate(midi_list)):
-        if j < 0:
-            continue
         # midi_path = content_dir / ("%s.mid" % flac.stem)
         if not midi_path.exists():
             continue
@@ -199,7 +203,8 @@ if __name__ == "__main__":
             
         # """
         # flac = content_dir / "aligned_midi" / ("%s.flac" % midi_path.stem)
-        flac = content_dir / "audio_clean" / midi_path.parts[-3] / midi_path.parts[-2] / ("%s.mp4" % midi_path.stem)
+        # flac = content_dir / "audio_clean" / midi_path.parts[-3] / midi_path.parts[-2] / ("%s.mp4" % midi_path.stem)
+        flac = content_dir / "BachChorale" / ("%s.flac" % midi_path.stem)
         wave, sr = torchaudio.load(flac)
         wave_mono = wave.mean(dim=0)
         if sr != SAMPLE_RATE:
