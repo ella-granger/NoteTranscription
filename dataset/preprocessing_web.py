@@ -8,6 +8,7 @@ import torchaudio
 from constants import *
 from mido import MidiFile
 from tqdm import tqdm
+import json
 
 
 start_time = {}
@@ -158,8 +159,11 @@ if __name__ == "__main__":
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
     # target_dir = Path("./test")
     # content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset/program_change_midi")
-    content_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
-    target_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
+    # content_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
+    # target_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
+
+    content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset")
+    target_dir = Path("./test/WebChorale")
     
     mel_dir = target_dir / "mel"
     note_dir = target_dir / "note"
@@ -167,12 +171,16 @@ if __name__ == "__main__":
     note_dir.mkdir(parents=True, exist_ok=True)
     
     # flac_list = list(content_dir.glob("*.WAV"))
-    midi_list = list((content_dir / "aligned_midi").glob("*.mid"))
+    midi_list = list((content_dir / "aligned_midi").glob("*/*/*.mid"))
+    with open(content_dir / "split" / "aligned_midi" / "test.json") as fin:
+        test_list = json.load(fin)
+
+    midi_list = [x for x in midi_list if x.stem in test_list]
 
     valid = 0
     # for flac in tqdm(flac_list):
     for j, midi_path in tqdm(enumerate(midi_list)):
-        if j < 79:
+        if j < 0:
             continue
         # midi_path = content_dir / ("%s.mid" % flac.stem)
         if not midi_path.exists():
@@ -190,7 +198,8 @@ if __name__ == "__main__":
 
             
         # """
-        flac = content_dir / "aligned_midi" / ("%s.flac" % midi_path.stem)
+        # flac = content_dir / "aligned_midi" / ("%s.flac" % midi_path.stem)
+        flac = content_dir / "audio_clean" / midi_path.parts[-3] / midi_path.parts[-2] / ("%s.mp4" % midi_path.stem)
         wave, sr = torchaudio.load(flac)
         wave_mono = wave.mean(dim=0)
         if sr != SAMPLE_RATE:
