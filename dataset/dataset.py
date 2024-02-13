@@ -14,6 +14,7 @@ class MelDataset(torch.utils.data.Dataset):
                  shuffle=True, device="cpu"):
         super().__init__()
 
+        self.voice_list = ["S", "A", "T", "B"]
         self.train_mode = train_mode
         self.seg_len = SEG_LEN
         self.shuffle = shuffle
@@ -72,7 +73,7 @@ class MelDataset(torch.utils.data.Dataset):
             cur_bar_list = []
             start_flag = False
             for bar in notes:
-                note_count = sum([len(v) for k, v in bar.items()])
+                note_count = sum([len(v) for k, v in bar.items() if k[0] in self.voice_list])
                 time_min = 1e6
                 time_max = -1
                 # print(note_count, bar)
@@ -81,6 +82,8 @@ class MelDataset(torch.utils.data.Dataset):
                         cur_bar_list.append(bar)
                         continue
                     for k, v in bar.items():
+                        if k[0] not in self.voice_list:
+                            continue
                         for note in v:
                             if note[-1] > time_max:
                                 time_max = note[-1]
@@ -93,7 +96,6 @@ class MelDataset(torch.utils.data.Dataset):
                         break
             # print(begin_time, end_time)
             # print(cur_bar_list)
-            voice_list = ["S", "A", "T", "B"]
             token = []
             if "S" in self.train_mode:
                 start = []
@@ -101,9 +103,13 @@ class MelDataset(torch.utils.data.Dataset):
             if "T" in self.train_mode:
                 start_t = []
                 end = []
+
             for bar in cur_bar_list:
-                full = True
-                for part in voice_list:
+                full = False
+                sig = bar["measure"]
+                max_time = 0
+                note_list = []
+                for part in self.voice_list:
                     part_list = []
                     last_list = []
                     for k, v in bar.items():
@@ -120,25 +126,30 @@ class MelDataset(torch.utils.data.Dataset):
                     last_count = 0
                     for idx, note in enumerate(part_list):
                         if note[3] < end_time and note[4] >= begin_time:
-                            token.append(note[0])
-                            if "S" in self.train_mode:
-                                start.append(note[1])
-                                dur.append(note[2])
-                            if "T" in self.train_mode:
-                                start_t.append(note[3])
-                                end.append(note[4])
+                            note_list.append(note)
                             if note in last_list:
-                                last_count += 1
-                    if last_count != len(last_list):
-                        full = False
+                                full = True
+
+                # print(note_list)
+                note_list = sorted(note_list, key=lambda x:(x[3], -x[0]))
+                for note in note_list:
+                    token.append(note[0])
+                    if "S" in self.train_mode:
+                        start.append(note[1])
+                        dur.append(note[2])
+                    if "T" in self.train_mode:
+                        start_t.append(note[3])
+                        end.append(note[4])
+                        if note[4] > max_time:
+                            max_time = note[4]
                 if full:
                     token.append(0)
                     if "S" in self.train_mode:
-                        start.append(0.0)
+                        start.append(sig)
                         dur.append(0.0)
                     if "T" in self.train_mode:
-                        start_t.append(0.0)
-                        end.append(0.0)
+                        start_t.append(max_time)
+                        end.append(max_time)
             # print(token)
             # print(start)
             # print(dur)
@@ -236,11 +247,13 @@ class MelDataset(torch.utils.data.Dataset):
         mel_length = mel.size(1)
         note_length = 0
         for bar in note[::-1]:
-            note_count = sum([len(v) for k, v in bar.items()])
+            note_count = sum([len(v) for k, v in bar.items() if k[0] in self.voice_list])
             # print(bar)
             # print(note_count)
             if note_count > 0:
                 for k, v in bar.items():
+                    if k[0] not in self.voice_list:
+                        continue
                     for note in v:
                         if note[-1] > note_length:
                             note_length = note[-1]
@@ -256,11 +269,11 @@ class MelDataset(torch.utils.data.Dataset):
 
         
 if __name__ == "__main__":
-    mel_dir = Path("./test/WebChorale/mel")
-    note_dir = Path("./test/WebChorale/note")
+    mel_dir = Path("./test/BachChorale/mel")
+    note_dir = Path("./test/BachChorale/note")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    dataset = MelDataset(mel_dir, note_dir, "./test/WebChorale/test.json", device=device)
+    dataset = MelDataset(mel_dir, note_dir, "./test/BachChorale/test.json", "S", device=device)
 
     from torch.utils.data import DataLoader
     batch_size = 1
@@ -271,6 +284,7 @@ if __name__ == "__main__":
                              num_workers=1,
                              collate_fn=dataset.collate_fn)
 
+    print(len(dataset))
     for x in test_loader:
         print(x)
         for k, v in x.items():
