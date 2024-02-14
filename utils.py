@@ -10,6 +10,8 @@ def plot_midi(pitch, start, end):
     for n, s, e in zip(pitch, start, end):
         if s <= e and n > 0:
             ax.hlines(n, s, e, linewidths=3)
+        if n == 0:
+            ax.vlines(s, min(pitch), max(pitch), linestyles="--", linewidths=2)
     fig.canvas.draw()
     plt.close()
     return fig
@@ -17,7 +19,7 @@ def plot_midi(pitch, start, end):
 
 def plot_score(pitch, start, dur):
     if type(pitch) != list:
-        pitch, start, dur = get_list_s(pitch, start_dur)
+        pitch, start, dur = get_list_s(pitch, start, dur)
 
     fig, ax = plt.subplots(figsize=(10, 4))
     cur_bar = 0
@@ -26,7 +28,7 @@ def plot_score(pitch, start, dur):
             ax.hlines(n, s + cur_bar, s+d+cur_bar, linewidths=3)
         else:
             cur_bar += 16
-            ax.vlines(cur_bar, min(pitch), max(pitch))
+            ax.vlines(cur_bar, min(pitch), max(pitch), linestyles="--", linewidths=2)
 
     fig.canvas.draw()
     plt.close()

@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_bach_layer2_ST",
+    "logdir": "runs/a2s_bach_layer2_T_new_seq",
 
     "n_layers": 2,
 
@@ -11,6 +11,8 @@
     "epochs": 500,
     "loss_norm": 1,
     "time_loss_alpha": 20,
+
+    "train_mode": "T",
 
     "data_path": "/storageSSD/huiran/NoteTranscription/BachChorale"
 }

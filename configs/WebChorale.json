@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_layer2_T",
+    "logdir": "runs/a2s_layer2_S_new_seq",
 
     "n_layers": 2,
 
@@ -12,7 +12,7 @@
     "loss_norm": 1,
     "time_loss_alpha": 20,
 
-    "train_mode": "T",
+    "train_mode": "S",
 
     "data_path": "/storageSSD/huiran/NoteTranscription/WebChorale"
 }

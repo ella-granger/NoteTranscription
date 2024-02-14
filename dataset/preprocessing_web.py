@@ -93,7 +93,14 @@ def convert_midi(midi_path):
                         note_dict[msg.note] = None
                         end_tick = cur_time
                         
+                        # print(start_tick, end_tick)
+                        while measure_sig_p >= 0:
+                            if measure_sigs[measure_sig_p][0] > start_tick:
+                                measure_sig_p -= 1
+                            else:
+                                break
                         while measure_sig_p < len(measure_sigs):
+                            # print(measure_sigs[measure_sig_p])
                             if measure_sigs[measure_sig_p][1] <= start_tick:
                                 measure_sig_p += 1
                             else:
@@ -134,6 +141,11 @@ def convert_midi(midi_path):
                         if dur == 0:
                             dur = 0.25
                         bar_note_list.append([msg.note, start_beat_q, dur])
+                        # if start_beat_q < 0:
+                        #     print(bar_note_list[-2:])
+                        #     print(ts)
+                        #     print(start_tick, end_tick)
+                        #     exit()
                         # print(bar_note_list[-1])
                         # _ = input()
 
@@ -196,8 +208,10 @@ def convert_midi(midi_path):
 
     print(len(final_measure_list))
     print(len(measure_sigs))
-    assert len(final_measure_list) == len(measure_sigs)
+    assert len(final_measure_list) <= len(measure_sigs)
     for i, sig in enumerate(measure_sigs):
+        if i == len(final_measure_list):
+            break
         measure = final_measure_list[i]
         measure["measure"] = sig[2]
     print("i:", i)
@@ -213,16 +227,16 @@ def convert_midi(midi_path):
 if __name__ == "__main__":
     # content_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale")
     # target_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale")
-    content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale")
+    # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
     # target_dir = Path("./test")
     # content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset/program_change_midi")
-    # content_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
-    # target_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
+    content_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
+    target_dir = Path("/storageSSD/huiran/NoteTranscription/WebChorale")
 
     # content_dir = Path("/media/ella/Yu/UR/datasets/WebChoralDataset")
     # target_dir = Path("./test/WebChorale")
-    target_dir = Path("./test/BachChorale")
+    # target_dir = Path("./test/BachChorale")
     
     mel_dir = target_dir / "mel"
     note_dir = target_dir / "note"
@@ -235,8 +249,8 @@ if __name__ == "__main__":
     #     test_list = json.load(fin)
     # midi_list = [x for x in midi_list if x.stem in test_list]
 
-    midi_list = list((content_dir / "midi_align").glob("*.mid")) # BachChorale
-    # midi_list = list((content_dir / "aligned_midi").glob("*.mid"))
+    # midi_list = list((content_dir / "midi_align").glob("*.mid")) # BachChorale
+    midi_list = list((content_dir / "aligned_midi").glob("*.mid"))
     # midi_list = list((content_dir / "BachChorale").glob("*.mid"))
 
     valid = 0

@@ -246,6 +246,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
                                 sw.add_text("gt/s_%d" % i, str(gt_list), step)
                                 sw.add_text("pred/s_%d" % i, str(pred_list), step)
+
+                                sw.add_figure("gt/s_%d" % i, plot_score(pitch_o, start_o, dur_o), step)
+                                sw.add_figure("pred/s_%d" % i, plot_score(pitch_p, start_p, dur_p), step)
                             if "T" in train_mode:
                                 pred_list = get_list_t(pitch_p, start_t_p, end_p)
                                 gt_list = get_list_t(pitch_o, start_t_o, end_o)
@@ -256,8 +259,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("gt/t_%d" % i, str(gt_list), step)
                                 sw.add_text("pred/t_%d" % i, str(pred_list), step)
                                 
-                                sw.add_figure("gt/%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
-                                sw.add_figure("pred/%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
+                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)
                         if "S" in train_mode:
@@ -298,9 +301,4 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 print(eval_loss, total_T / total_C)
                 model.train()
                 
-            step += 1
-
-            
-            
-
-            
+            step += 1 
