@@ -1,7 +1,7 @@
 {
-    "logdir": "runs/a2s_bach_layer3_S_new_seq_scheduled_sampling",
+    "logdir": "runs/a2s_bach_layer2_ST_new_seq_scheduled_sampling_alpha10",
 
-    "n_layers": 3,
+    "n_layers": 2,
 
     "batch_size": 4,
 
@@ -12,7 +12,7 @@
     "loss_norm": 1,
     "time_loss_alpha": 20,
 
-    "train_mode": "S",
+    "train_mode": "ST",
 
     "data_path": "/storageSSD/huiran/NoteTranscription/BachChorale"
 }

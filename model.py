@@ -12,10 +12,13 @@ def get_mix_mask(pitch, step):
     if step < 30000:
         t = 1
     else:
-        t = max(epsilon, 1 - 0.00001 * (step - 30000))
+        t = max(epsilon, 1 - 0.000003 * (step - 30000))
+    # t = max(epsilon, 1 - 0.1 * step)
     U = torch.rand((pitch.size(0), pitch.size(1)))
     U = (U > t)
     U[:, 0] = False
+    # print(U)
+    # _ = input()
     return U
 
 
@@ -168,15 +171,30 @@ class NoteTransformer(nn.Module):
     def get_mix_emb(self, p, i, emb):
         # p
         e = emb.weight #(idx_num, emb_dim)
+        # print(p.mean())
+        # print(p.std())
         G_y = torch.rand(e.size(0))
+        # print(G_y)
         G_y = -torch.log(-torch.log(G_y))
+        # print(G_y)
 
         device = p.device
         G_y = G_y.to(device)
 
+        # print(p.size())
+        # print(G_y.size())
         s = self.alpha * p + G_y
+        # print(s.mean())
+        # print(s.std())
+        # print(s[0, 3, :])
         w = F.softmax(s, dim=-1)
+        # print(w[0, 3, :])
+
+        # print(w.size())
+        # print(e.size())
         e = torch.matmul(w, e)
+        # print(e.size())
+        # _ = input()
         return e
 
 
