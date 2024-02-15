@@ -118,13 +118,32 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 start_t_i, start_t_o = patch_trg(start_t)
                 end_i, end_o = patch_trg(end)
 
-            optimizer.zero_grad()
             result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
 
             if train_mode == "S":
                 pitch_p, start_p, dur_p = result
+                start_t_p = None
+                end_p = None
             elif train_mode == "T":
                 pitch_p, start_t_p, end_p = result
+                start_p = None
+                dur_p = None
+            else:
+                pitch_p, start_t_p, end_p, start_p, dur_p = result
+                
+            optimizer.zero_grad()
+            result = model.forward_mix(mel, step,
+                                       pitch_p, start_p, dur_p, start_t_p, end_p,
+                                       pitch_i, start_i, dur_i, start_t_i, end_i)
+
+            if train_mode == "S":
+                pitch_p, start_p, dur_p = result
+                start_t_p = None
+                end_p = None
+            elif train_mode == "T":
+                pitch_p, start_t_p, end_p = result
+                start_p = None
+                dur_p = None
             else:
                 pitch_p, start_t_p, end_p, start_p, dur_p = result
 

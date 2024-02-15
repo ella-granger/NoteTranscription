@@ -6,6 +6,16 @@ from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_ma
 from dataset.constants import *
 
 
+def get_mix_mask(pitch, step):
+    # reach lowest point at 30k
+    epsilon = 0.1
+    t = max(epsilon, 1 - 0.00003 * step)
+    U = torch.rand((pitch.size(0), pitch.size(1)))
+    U = (U > t)
+    U[:, 0] = False
+    return U
+
+
 class TimeEncoding(nn.Module):
 
     def __init__(self, d_hid):
@@ -31,8 +41,10 @@ class TimeEncoding(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, alpha=10):
         super(NoteTransformer, self).__init__()
+
+        self.alpha = alpha
 
         # ConvNet
         padding_len = kernel_size // 2
@@ -148,6 +160,71 @@ class NoteTransformer(nn.Module):
             return pitch_out, start_t_out, end_out, start_s_out, dur_out
         
         # return pitch_out, start_out, end_out
+
+
+    def get_mix_emb(self, p, i, emb):
+        # p
+        e = emb.weight #(idx_num, emb_dim)
+        G_y = torch.rand(e.size(0))
+        G_y = -torch.log(-torch.log(G_y))
+
+        s = self.alpha * p + G_y
+        w = F.softmax(s, dim=-1)
+        e = torch.matmul(w, e)
+        return e
+
+
+    def forward_mix(self, mel, step,
+                    pitch_p, start_p, dur_p, start_t_p, end_p,
+                    pitch_i, start_i, dur_i, start_t_i, end_i):
+        mel = self.cnn(mel)
+        mel = torch.permute(mel, (0, 2, 1))
+
+        enc, *_ = self.encoder(mel)
+
+        trg_mask = get_pad_mask(pitch_i, PAD_IDX) & get_subsequent_mask(pitch)
+
+        mix_mask = get_mix_mask(pitch_i, step)
+
+        pitch = self.get_mix_emb(pitch_p, pitch_i, self.trg_pitch_emb)
+        pitch_i[mix_mask] = pitch_emb[mix_mask]
+        if "S" self.train_mode:
+            start = self.get_mix_emb(start_p, start_i, self.trg_start_emb)
+            dur = self.get_mix_emb(dur_p, dur_i, self.trg_dur_emb)
+            start_i[mix_mask] = start[mix_mask]
+            dur_i[mix_mask] = dur[mix_mask]
+        if "T" in self.train_mode:
+            start_t_i[mix_mask] = start_t_p[mix_mask]
+            end_t_i[mix_mask] = end_p[mix_mask]
+            start_t = torch.unsqueeze(start_t_i, -1)
+            end = torch.unsqueeze(end_i, -1)
+
+        if self.train_mode == "T":
+            trg_seq = torch.cat([pitch, start_t, end], dim=-1)
+        elif self.train_mode == "S":
+            trg_seq = torch.cat([pitch, start_s, dur], dim=-1)
+        else:
+            trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
+        
+        dec, *_ = self.decoder(trg_seq, trg_mask, enc)
+
+        pitch_out = self.trg_pitch_prj(dec)
+
+        if "S" in self.train_mode:
+            start_s_out = self.trg_start_s_prj(dec)
+            dur_out = self.trg_dur_s_prj(dec)
+        if "T" in self.train_mode:
+            start_t_out = self.trg_start_t_prj(dec)
+            start_t_out = F.sigmoid(start_t_out)
+            end_out = self.trg_end_prj(dec)
+            end_out = F.sigmoid(end_out)
+
+        if self.train_mode == "T":
+            return pitch_out, start_t_out, end_out
+        elif self.train_mode == "S":
+            return pitch_out, start_s_out, dur_out
+        else:
+            return pitch_out, start_t_out, end_out, start_s_out, dur_out           
 
 
     def predict(self, mel):
