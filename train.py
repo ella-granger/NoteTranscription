@@ -263,8 +263,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                                 gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
 
-                                sw.add_text("gt/s_%d" % i, str(gt_list), step)
-                                sw.add_text("pred/s_%d" % i, str(pred_list), step)
+                                sw.add_text("s/%d/gt" % i, str(gt_list), step)
+                                sw.add_text("s/%d_pred" % i, str(pred_list), step)
 
                                 sw.add_figure("gt/s_%d" % i, plot_score(pitch_o, start_o, dur_o), step)
                                 sw.add_figure("pred/s_%d" % i, plot_score(pitch_p, start_p, dur_p), step)
@@ -275,8 +275,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                                 gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
 
-                                sw.add_text("gt/t_%d" % i, str(gt_list), step)
-                                sw.add_text("pred/t_%d" % i, str(pred_list), step)
+                                sw.add_text("t/%d/gt" % i, str(gt_list), step)
+                                sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
                                 sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
                                 sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)

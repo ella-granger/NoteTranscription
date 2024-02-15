@@ -18,7 +18,7 @@ ex = Experiment("text_transcription")
 
 @ex.config
 def cfg():
-    ckpt_id = "00065000"
+    ckpt_id = "00060000"
 
 
 @ex.automain

@@ -9,7 +9,10 @@ from dataset.constants import *
 def get_mix_mask(pitch, step):
     # reach lowest point at 30k
     epsilon = 0.1
-    t = max(epsilon, 1 - 0.00003 * step)
+    if step < 30000:
+        t = 1
+    else:
+        t = max(epsilon, 1 - 0.00001 * (step - 30000))
     U = torch.rand((pitch.size(0), pitch.size(1)))
     U = (U > t)
     U[:, 0] = False
@@ -168,6 +171,9 @@ class NoteTransformer(nn.Module):
         G_y = torch.rand(e.size(0))
         G_y = -torch.log(-torch.log(G_y))
 
+        device = p.device
+        G_y = G_y.to(device)
+
         s = self.alpha * p + G_y
         w = F.softmax(s, dim=-1)
         e = torch.matmul(w, e)
@@ -182,29 +188,40 @@ class NoteTransformer(nn.Module):
 
         enc, *_ = self.encoder(mel)
 
-        trg_mask = get_pad_mask(pitch_i, PAD_IDX) & get_subsequent_mask(pitch)
+        trg_mask = get_pad_mask(pitch_i, PAD_IDX) & get_subsequent_mask(pitch_i)
 
         mix_mask = get_mix_mask(pitch_i, step)
 
         pitch = self.get_mix_emb(pitch_p, pitch_i, self.trg_pitch_emb)
-        pitch_i[mix_mask] = pitch_emb[mix_mask]
-        if "S" self.train_mode:
+        pitch_i = self.trg_pitch_emb(pitch_i)
+        # print(pitch_i.size())
+        # print(pitch.size())
+        # print(mix_mask.size())
+        pitch_i[mix_mask] = pitch[mix_mask]
+        if "S" in self.train_mode:
             start = self.get_mix_emb(start_p, start_i, self.trg_start_emb)
             dur = self.get_mix_emb(dur_p, dur_i, self.trg_dur_emb)
+            start_i = self.trg_start_emb(start_i)
+            dur_i = self.trg_dur_emb(dur_i)
             start_i[mix_mask] = start[mix_mask]
             dur_i[mix_mask] = dur[mix_mask]
         if "T" in self.train_mode:
+            # print(start_t_i.size())
+            # print(start_t_p.size())
+            # print(mix_mask.size())
+            start_t_i = torch.unsqueeze(start_t_i, -1)
+            end_i = torch.unsqueeze(end_i, -1)
             start_t_i[mix_mask] = start_t_p[mix_mask]
-            end_t_i[mix_mask] = end_p[mix_mask]
-            start_t = torch.unsqueeze(start_t_i, -1)
-            end = torch.unsqueeze(end_i, -1)
+            end_i[mix_mask] = end_p[mix_mask]
+            start_t_i = self.start_prj(start_t_i)
+            end_i = self.end_prj(end_i)
 
         if self.train_mode == "T":
-            trg_seq = torch.cat([pitch, start_t, end], dim=-1)
+            trg_seq = torch.cat([pitch_i, start_t_i, end_i], dim=-1)
         elif self.train_mode == "S":
-            trg_seq = torch.cat([pitch, start_s, dur], dim=-1)
+            trg_seq = torch.cat([pitch_i, start_i, dur_i], dim=-1)
         else:
-            trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
+            trg_seq = torch.cat([pitch_i, start_t_i, end_i, start_i, dur_i], dim=-1)
         
         dec, *_ = self.decoder(trg_seq, trg_mask, enc)
 
