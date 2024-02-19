@@ -37,6 +37,14 @@ def masked_l2(pred, gt, mask):
     return loss
 
 
+def get_mix_t(step, k, epsilon):
+    if step < 30000:
+        t = 1
+    else:
+        t = max(epsilon, 1 - k * (step - 30000))
+    return t
+
+
 @ex.config
 def config():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -46,11 +54,13 @@ def config():
     checkpoint_interval = 5000
     warmup_steps = 8000
     train_mode = "TS"
+    mix_k = 0.000003
+    epsilon = 0.1
 
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
-          learning_rate, warmup_steps,
+          learning_rate, warmup_steps, mix_k, epsilon,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, train_mode):
@@ -132,7 +142,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 pitch_p, start_t_p, end_p, start_p, dur_p = result
                 
             optimizer.zero_grad()
-            result = model.forward_mix(mel, step,
+            t = get_mix_t(step, mix_k, epsilon)
+            result = model.forward_mix(mel, t,
                                        pitch_p, start_p, dur_p, start_t_p, end_p,
                                        pitch_i, start_i, dur_i, start_t_i, end_i)
 
@@ -182,6 +193,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
                     sw.add_scalar("training/end_loss", end_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
+                sw.add_scalar("training/mix_t", t, step)
 
             if step % checkpoint_interval == 0: # and step > 0:
                 checkpoint_path = logdir / "ckpt"

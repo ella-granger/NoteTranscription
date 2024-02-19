@@ -6,14 +6,8 @@ from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_ma
 from dataset.constants import *
 
 
-def get_mix_mask(pitch, step):
+def get_mix_mask(pitch, t):
     # reach lowest point at 30k
-    epsilon = 0.1
-    if step < 30000:
-        t = 1
-    else:
-        t = max(epsilon, 1 - 0.000003 * (step - 30000))
-    # t = max(epsilon, 1 - 0.1 * step)
     U = torch.rand((pitch.size(0), pitch.size(1)))
     U = (U > t)
     U[:, 0] = False
@@ -198,7 +192,7 @@ class NoteTransformer(nn.Module):
         return e
 
 
-    def forward_mix(self, mel, step,
+    def forward_mix(self, mel, t,
                     pitch_p, start_p, dur_p, start_t_p, end_p,
                     pitch_i, start_i, dur_i, start_t_i, end_i):
         mel = self.cnn(mel)
@@ -208,7 +202,7 @@ class NoteTransformer(nn.Module):
 
         trg_mask = get_pad_mask(pitch_i, PAD_IDX) & get_subsequent_mask(pitch_i)
 
-        mix_mask = get_mix_mask(pitch_i, step)
+        mix_mask = get_mix_mask(pitch_i, t)
 
         pitch = self.get_mix_emb(pitch_p, pitch_i, self.trg_pitch_emb)
         pitch_i = self.trg_pitch_emb(pitch_i)
