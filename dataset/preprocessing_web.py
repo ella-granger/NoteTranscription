@@ -250,7 +250,7 @@ if __name__ == "__main__":
     # midi_list = [x for x in midi_list if x.stem in test_list]
 
     # midi_list = list((content_dir / "midi_align").glob("*.mid")) # BachChorale
-    midi_list = list((content_dir / "aligned_midi").glob("*.mid"))
+    midi_list = list((content_dir / "aligned_midi_pda").glob("*.mid"))
     # midi_list = list((content_dir / "BachChorale").glob("*.mid"))
 
     valid = 0
@@ -274,8 +274,8 @@ if __name__ == "__main__":
             pickle.dump(track_note_list, fout, protocol=4)
 
             
-        """
-        # flac = content_dir / "aligned_midi" / ("%s.flac" % midi_path.stem)
+        # """
+        flac = content_dir / "aligned_midi_pda" / ("%s.flac" % midi_path.stem)
         # flac = content_dir / "audio_clean" / midi_path.parts[-3] / midi_path.parts[-2] / ("%s.mp4" % midi_path.stem)
         # flac = content_dir / "BachChorale" / ("%s.flac" % midi_path.stem)
         wave, sr = torchaudio.load(flac)
@@ -296,7 +296,7 @@ if __name__ == "__main__":
         with open(mel_dir / ("%s.pkl" % flac.stem), 'wb') as fout:
             pickle.dump(mel_spec, fout, protocol=4)
 
-        """
+        # """
 
         # break
         # _ = input()

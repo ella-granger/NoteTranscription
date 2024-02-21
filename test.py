@@ -19,13 +19,15 @@ ex = Experiment("text_transcription")
 @ex.config
 def cfg():
     ckpt_id = "00120000"
+    mix_k = 0
+    epsilon = 0
 
 
 @ex.automain
-def test(logdir, device, data_path, n_layers, ckpt_id,
+def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
-         val_interval, loss_norm, time_loss_alpha, train_mode):
+        val_interval, loss_norm, time_loss_alpha, train_mode):
     logdir = Path(logdir)
     print_config(ex.current_run)
 
@@ -63,6 +65,16 @@ def test(logdir, device, data_path, n_layers, ckpt_id,
                 start_t = x["start_t"].to(device)
                 end = x["end"].to(device)
 
+            fid = x["fid"][0]
+            begin_time = x["begin_time"][0].item()
+            end_time = x["end_time"][0].item()
+
+            print(pitch - 1 + MIN_MIDI)
+            print(start)
+            print(dur)
+            print(fid, begin_time, end_time)
+            # _ = input()
+
             result = model.predict(mel)
 
             if train_mode == "S":
@@ -70,25 +82,25 @@ def test(logdir, device, data_path, n_layers, ckpt_id,
             elif train_mode == "T":
                 pitch_p, start_t_p, end_p = result
             else:
-                pitch_p, start_p, dur_p, start_t_p, end_p = result
+                pitch_p, start_t_p, end_p, start_p, dur_p = result
 
             if i < 5:
                 if "S" in train_mode:
                     pred_list = get_list_s(pitch_p, start_p, dur_p)
                     gt_list = get_list_s(pitch, start, dur)
                     fig_pred = plot_score(*pred_list)
-                    fig_pred.savefig("pred/pred_score_%d.png" % i)
+                    fig_pred.savefig("pred/pred_score_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time))
                     fig_gt = plot_score(*gt_list)
-                    fig_gt.savefig("pred/gt_score_%d.png" % i)
+                    fig_gt.savefig("pred/gt_score_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time))
 
                 if "T" in train_mode:
                     pred_list = get_list_t(pitch_p, start_t_p, end_p)
                     gt_list = get_list_t(pitch, start_t, end)
                     
                     fig_pred = plot_midi(*pred_list)
-                    fig_pred.savefig("pred/pred_trans_%d.png" % i)
+                    fig_pred.savefig("pred/pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time))
                     fig_gt = plot_midi(*gt_list)
-                    fig_gt.savefig("pred/gt_trans_%d.png" % i)
+                    fig_gt.savefig("pred/gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time))
             else:
                 break
     

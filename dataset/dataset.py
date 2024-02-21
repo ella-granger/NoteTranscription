@@ -31,9 +31,11 @@ class MelDataset(torch.utils.data.Dataset):
         self.note_list = []
         self.dataset_len = 0
 
+        self.fid_list = []
         for f in mel_files:
             if f.stem not in id_list:
                 continue
+            self.fid_list.append(f.stem)
             with open(f, 'rb') as fin:
                 mel = pickle.load(fin)
             with open(note_dir / ("%s.pkl" % f.stem), "rb") as fin:
@@ -56,6 +58,7 @@ class MelDataset(torch.utils.data.Dataset):
 
         mel = self.mel_list[index]
         notes = self.note_list[index]
+        fid = self.fid_list[index]
 
         # print(mel.size())
 
@@ -143,13 +146,13 @@ class MelDataset(torch.utils.data.Dataset):
                         if note[4] > max_time:
                             max_time = note[4]
                 if full:
-                    token.append(0)
                     if "S" in self.train_mode:
+                        token.append(0)
                         start.append(sig)
                         dur.append(0.0)
-                    if "T" in self.train_mode:
-                        start_t.append(max_time)
-                        end.append(max_time)
+                        if "T" in self.train_mode:
+                            start_t.append(max_time)
+                            end.append(max_time)
             # print(token)
             # print(start)
             # print(dur)
@@ -200,19 +203,28 @@ class MelDataset(torch.utils.data.Dataset):
             data_point = dict(mel=mel,
                               pitch=token,
                               start=start,
-                              dur=dur)
+                              dur=dur,
+                              begin_time=begin_time,
+                              end_time=end_time,
+                              fid=fid)
         elif self.train_mode == "T":
             data_point = dict(mel=mel,
                               pitch=token,
                               start_t=start_t,
-                              end=end)
+                              end=end,
+                              begin_time=begin_time,
+                              end_time=end_time,
+                              fid=fid)
         else:
             data_point = dict(mel=mel,
                               pitch=token,
                               start=start,
                               dur=dur,
                               start_t=start_t,
-                              end=end)
+                              end=end,
+                              begin_time=begin_time,
+                              end_time=end_time,
+                              fid=fid)
         return data_point
 
 
@@ -230,16 +242,14 @@ class MelDataset(torch.utils.data.Dataset):
             return torch.stack(x_list)
 
         result = {}
-        result["mel"] = torch.stack([x["mel"] for x in batch])
 
-        for key in pad_dict:
-            if key in batch[0]:
-                v = [x[key] for x in batch]
+        for key in batch[0]:
+            v = [x[key] for x in batch]
+            if key in pad_dict:
                 v = pad_and_stack(v, pad_dict[key])
-                result[key] = v
+            result[key] = v
+        result["mel"] = torch.stack(result["mel"])
 
-        # print(result)
-        # _ = input()
         return result
             
 

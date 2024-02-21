@@ -316,6 +316,8 @@ class NoteTransformer(nn.Module):
             if "T" in self.train_mode:
                 start_t[:, i+1, 0] = start_t_out[:, i, 0]
                 end[:, i+1, 0] = end_out[:, i, 0]
+            # print(pitch[:, :i+1])
+            # _ = input()
 
         pitch = pitch[:, 1:i]
         if "S" in self.train_mode:
@@ -326,9 +328,14 @@ class NoteTransformer(nn.Module):
             end = end[:, 1:i, 0]
 
         if self.train_mode == "T":
-            return pitch_out, start_t_out, end_out
+            return pitch, start_t, end
         elif self.train_mode == "S":
-            return pitch_out, start_out, dur_out
+            return pitch, start, dur
         else:
-            return pitch_out, start_t_out, end_out, start_out, dur_out
+            print("------")
+            print(pitch)
+            print(start)
+            print(dur)
+            _ = input()
+            return pitch, start_t, end, start, dur
         
