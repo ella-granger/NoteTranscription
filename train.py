@@ -104,6 +104,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     
     model.train()
     step = 0
+    max_pitch_prec = 0
     for e in range(epochs):
         itr = tqdm(train_loader)
         for x in itr:
@@ -196,16 +197,6 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
                 sw.add_scalar("training/mix_t", t, step)
 
-            if step % checkpoint_interval == 0: # and step > 0:
-                checkpoint_path = logdir / "ckpt"
-                checkpoint_path.mkdir(exist_ok=True)
-                checkpoint_path = checkpoint_path / ("%08d" % step)
-                obj = {"model": model.state_dict(),
-                       "optim": optimizer._optimizer.state_dict(),
-                       "steps": step,
-                       "epoch": e}
-                torch.save(obj, str(checkpoint_path))
-
             if step % val_interval == 0:
                 model.eval()
                 with torch.no_grad():
@@ -293,13 +284,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
 
                             for a_i, attn in enumerate(enc_attn):
-                                # print(a_i, attn.size())
                                 sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             for a_i, attn in enumerate(dec_self_attn):
-                                # print(a_i, attn.size())
                                 sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             for a_i, attn in enumerate(dec_enc_attn):
-                                # print(a_i, attn.size())
                                 sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             if "S" in train_mode:
                                 pred_list = get_list_s(pitch_p, start_p, dur_p)
@@ -364,6 +352,21 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("eval/start_prec", total_start_T / total_C, step)
                     sw.add_scalar("eval/dur_prec", total_dur_T / total_C, step)
                 print(eval_loss, total_T / total_C)
+
+                checkpoint_path = logdir / "ckpt"
+                checkpoint_path.mkdir(exist_ok=True)
+                checkpoint_path = checkpoint_path / "cur"
+                obj = {"model": model.state_dict(),
+                       "optim": optimizer._optimizer.state_dict(),
+                       "steps": step,
+                       "epoch": e}
+                torch.save(obj, str(checkpoint_path))
+
+                if total_T / total_C > max_pitch_prec:
+                    max_pitch_prec = total_T / total_C
+                    checkpoint_path = checkpoint_path / "best"
+                    torch.save(obj, str(checkpoint_path))
+
                 model.train()
                 
             step += 1 
