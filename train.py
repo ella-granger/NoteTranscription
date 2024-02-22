@@ -247,7 +247,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             start_t_i, start_t_o = patch_trg(start_t)
                             end_i, end_o = patch_trg(end)
 
-                        result, (enc_attn, dec_attn) = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_attns=True)
+                        result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_attns=True)
                         if train_mode == "S":
                             pitch_p, start_p, dur_p = result
                         elif train_mode == "T":
@@ -282,7 +282,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 audio_path = Path("/storageSSD/huiran/BachChorale/BachChorale")
                             audio_f = audio_path / ("%s.flac" % fid)
                             wav, sr = torchaudio.load(audio_f)
-                            print(sr)
+                            # print(sr)
                             b = int(b * sr)
                             e = int(e * sr)
                             wav = wav.mean(dim=0)
@@ -293,9 +293,14 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
 
                             for a_i, attn in enumerate(enc_attn):
-                                print(a_i, attn.size())
-                            for a_i, attn in enumerate(dec_attn):
-                                print(a_i, attn_size())
+                                # print(a_i, attn.size())
+                                sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(dec_self_attn):
+                                # print(a_i, attn.size())
+                                sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(dec_enc_attn):
+                                # print(a_i, attn.size())
+                                sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             if "S" in train_mode:
                                 pred_list = get_list_s(pitch_p, start_p, dur_p)
                                 gt_list = get_list_s(pitch_o, start_o, dur_o)

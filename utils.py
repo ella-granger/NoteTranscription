@@ -2,6 +2,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def plot_attn(attn):
+    K = attn.shape[0]
+    n_cols = 2
+    n_rows = K // 2
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(8,8))
+
+    for i in range(K):
+        axs[i // n_cols, i % n_cols].imshow(attn[i], origin="lower")
+
+    plt.close()
+    return fig
+
+
 def plot_spec(spec):
     fig, ax = plt.subplots(figsize=(10, 3))
     im = ax.imshow(spec, aspect="auto", origin="lower", interpolation="none")

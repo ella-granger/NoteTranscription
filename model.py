@@ -137,7 +137,7 @@ class NoteTransformer(nn.Module):
             trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
 
         if return_attns:
-            dec, dec_attn = self.decoder(trg_seq, trg_mask, enc, return_attns=True)
+            dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, enc, return_attns=True)
         else:
             dec, *_ = self.decoder(trg_seq, trg_mask, enc)
 
@@ -167,7 +167,9 @@ class NoteTransformer(nn.Module):
         
         # return pitch_out, start_out, end_out
         if return_attns:
-            return result, (enc_attn, dec_attn)
+            return result, (enc_attn, dec_self_attn, dec_enc_attn)
+        else:
+            return result
 
 
     def get_mix_emb(self, p, i, emb):
