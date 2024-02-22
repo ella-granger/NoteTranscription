@@ -223,9 +223,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
                         pitch = batch["pitch"].to(device)
+                        # print(batch["fid"], batch["begin_time"], batch["end_time"])
                         fid = batch["fid"][0]
-                        begin_time = x["begin_time"][0]
-                        end_time = x["end_time"][0]
+                        begin_time = batch["begin_time"][0]
+                        end_time = batch["end_time"][0]
 
                         start_i = None
                         dur_i = None
@@ -281,12 +282,15 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 audio_path = Path("/storageSSD/huiran/BachChorale/BachChorale")
                             audio_f = audio_path / ("%s.flac" % fid)
                             wav, sr = torchaudio.load(audio_f)
+                            print(sr)
                             b = int(b * sr)
                             e = int(e * sr)
                             wav = wav.mean(dim=0)
                             wav = wav[b:e]
                             if len(wav) > 0:
                                 sw.add_audio("%d" % i, wav, step, sr)
+                                sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
+                            sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
                             if "S" in train_mode:
                                 pred_list = get_list_s(pitch_p, start_p, dur_p)
                                 gt_list = get_list_s(pitch_o, start_o, dur_o)
@@ -311,6 +315,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 
                                 sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
                                 sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
+                            # _ = input()
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)
                         if "S" in train_mode:

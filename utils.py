@@ -2,6 +2,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def plot_spec(spec):
+    fig, ax = plt.subplots(figsize=(10, 3))
+    im = ax.imshow(spec, aspect="auto", origin="lower", interpolation="none")
+    plt.colorbar(im, ax=ax)
+
+    fig.canvas.draw()
+    plt.close()
+    return fig
+
+
 def plot_midi(pitch, start, end):
     if type(pitch) != list:
         pitch, start, end = get_list_t(pitch, start, end)
