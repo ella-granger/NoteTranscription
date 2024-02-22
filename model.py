@@ -98,13 +98,16 @@ class NoteTransformer(nn.Module):
 
         self.train_mode = train_mode
 
-    def forward(self, mel, pitch, start_s, dur, start_t, end):
+    def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False):
         # mel feature extraction
         mel = self.cnn(mel)
         mel = torch.permute(mel, (0, 2, 1))
 
         # encoding
-        enc, *_ = self.encoder(mel)
+        if return_attns:
+            enc, enc_attn = self.encoder(mel, return_attns=True)
+        else:
+            enc, *_ = self.encoder(mel)
 
         # decoding
         trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
@@ -132,8 +135,11 @@ class NoteTransformer(nn.Module):
             # print(start_s.size())
             # print(dur.size())
             trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
-        
-        dec, *_ = self.decoder(trg_seq, trg_mask, enc)
+
+        if return_attns:
+            dec, dec_attn = self.decoder(trg_seq, trg_mask, enc, return_attns=True)
+        else:
+            dec, *_ = self.decoder(trg_seq, trg_mask, enc)
 
         pitch_out = self.trg_pitch_prj(dec)
 
@@ -153,13 +159,15 @@ class NoteTransformer(nn.Module):
         # end_out = F.sigmoid(end_out)
 
         if self.train_mode == "T":
-            return pitch_out, start_t_out, end_out
+            result = (pitch_out, start_t_out, end_out)
         elif self.train_mode == "S":
-            return pitch_out, start_s_out, dur_out
+            result = (pitch_out, start_s_out, dur_out)
         else:
-            return pitch_out, start_t_out, end_out, start_s_out, dur_out
+            result = (pitch_out, start_t_out, end_out, start_s_out, dur_out)
         
         # return pitch_out, start_out, end_out
+        if return_attns:
+            return result, (enc_attn, dec_attn)
 
 
     def get_mix_emb(self, p, i, emb):

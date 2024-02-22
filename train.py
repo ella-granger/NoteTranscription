@@ -247,7 +247,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             start_t_i, start_t_o = patch_trg(start_t)
                             end_i, end_o = patch_trg(end)
 
-                        result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
+                        result, (enc_attn, dec_attn) = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_attns=True)
                         if train_mode == "S":
                             pitch_p, start_p, dur_p = result
                         elif train_mode == "T":
@@ -291,6 +291,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_audio("%d" % i, wav, step, sr)
                                 sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
+
+                            for a_i, attn in enumerate(enc_attn):
+                                print(a_i, attn.size())
+                            for a_i, attn in enumerate(dec_attn):
+                                print(a_i, attn_size())
                             if "S" in train_mode:
                                 pred_list = get_list_s(pitch_p, start_p, dur_p)
                                 gt_list = get_list_s(pitch_o, start_o, dur_o)
