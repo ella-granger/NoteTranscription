@@ -39,6 +39,44 @@ class TimeEncoding(nn.Module):
         return enc
 
 
+class ConvStack(nn.Module):
+
+    def __init__(self, input_features, output_features):
+        super().__init__()
+
+        # input is batch_size * 1 channel * frames * input_features
+        self.cnn = nn.Sequential(
+            # layer 0
+            nn.Conv2d(1, output_features // 16, (3, 3), padding=1),
+            nn.BatchNorm2d(output_features // 16),
+            nn.ReLU(),
+            # layer 1
+            nn.Conv2d(output_features // 16, output_features // 16, (3, 3), padding=1),
+            nn.BatchNorm2d(output_features // 16),
+            nn.ReLU(),
+            # layer 2
+            nn.MaxPool2d((1, 2)),
+            nn.Dropout(0.25),
+            nn.Conv2d(output_features // 16, output_features // 8, (3, 3), padding=1),
+            nn.BatchNorm2d(output_features // 8),
+            nn.ReLU(),
+            # layer 3
+            nn.MaxPool2d((1, 2)),
+            nn.Dropout(0.25),
+        )
+        self.fc = nn.Sequential(
+            nn.Linear((output_features // 8) * (input_features // 4), output_features),
+            nn.Dropout(0.5)
+        )
+
+    def forward(self, mel):
+        x = mel.view(mel.size(0), 1, mel.size(1), mel.size(2))
+        x = self.cnn(x)
+        x = x.transpose(1, 2).flatten(-2)
+        x = self.fc(x)
+        return x
+
+
 class NoteTransformer(nn.Module):
 
     def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, alpha=10):
@@ -47,6 +85,7 @@ class NoteTransformer(nn.Module):
         self.alpha = alpha
 
         # ConvNet
+        """
         padding_len = kernel_size // 2
         self.cnn = nn.Sequential(
             nn.Conv1d(N_MELS, d_model, kernel_size, padding=padding_len),
@@ -57,6 +96,9 @@ class NoteTransformer(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.1)
         )
+        """
+
+        self.cnn = ConvStack(N_MELS, d_model)
 
         self.d_model = d_model
         # Encoder
