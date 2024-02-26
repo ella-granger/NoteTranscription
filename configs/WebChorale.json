@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_layer2_ST_new_seq_scheduled_sampling",
+    "logdir": "runs/a2s_layer2_ST_new_seq_ori",
 
     "n_layers": 2,
 

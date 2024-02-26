@@ -39,6 +39,7 @@ def masked_l2(pred, gt, mask):
 
 
 def get_mix_t(step, k, epsilon):
+    return 1
     if step < 30000:
         t = 1
     else:
@@ -355,17 +356,17 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
                 checkpoint_path = logdir / "ckpt"
                 checkpoint_path.mkdir(exist_ok=True)
-                checkpoint_path = checkpoint_path / "cur"
+                save_path = checkpoint_path / "cur"
                 obj = {"model": model.state_dict(),
                        "optim": optimizer._optimizer.state_dict(),
                        "steps": step,
                        "epoch": e}
-                torch.save(obj, str(checkpoint_path))
+                torch.save(obj, str(save_path))
 
                 if total_T / total_C > max_pitch_prec:
                     max_pitch_prec = total_T / total_C
-                    checkpoint_path = checkpoint_path / "best"
-                    torch.save(obj, str(checkpoint_path))
+                    save_path = checkpoint_path / "best"
+                    torch.save(obj, str(save_path))
 
                 model.train()
                 

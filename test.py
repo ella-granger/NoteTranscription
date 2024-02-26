@@ -18,7 +18,8 @@ ex = Experiment("text_transcription")
 
 @ex.config
 def cfg():
-    ckpt_id = "00120000"
+    # ckpt_id = "00120000"
+    ckpt_id = "best"
     mix_k = 0
     epsilon = 0
 
