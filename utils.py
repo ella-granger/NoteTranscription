@@ -25,9 +25,15 @@ def plot_spec(spec):
     return fig
 
 
-def plot_midi(pitch, start, end):
+def plot_midi(pitch, start, end, inc=False):
     if type(pitch) != list:
         pitch, start, end = get_list_t(pitch, start, end)
+
+    if inc:
+        for i in range(len(start)):
+            if i > 0:
+                start[i] += start[i-1]
+            end[i] += start[i]
 
     fig, ax = plt.subplots(figsize=(10, 4))
     for n, s, e in zip(pitch, start, end):

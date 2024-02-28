@@ -58,6 +58,7 @@ def config():
     train_mode = "TS"
     mix_k = 0.000003
     epsilon = 0.1
+    enable_encoder = True
 
 
 @ex.automain
@@ -65,7 +66,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, warmup_steps, mix_k, epsilon,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
-          loss_norm, time_loss_alpha, train_mode):
+          loss_norm, time_loss_alpha, train_mode, enable_encoder):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -95,7 +96,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
-                            train_mode=train_mode)
+                            train_mode=train_mode,
+                            enable_encoder=enable_encoder)
     model = model.to(device)
 
     optimizer = ScheduledOptim(
@@ -313,8 +315,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("t/%d/gt" % i, str(gt_list), step)
                                 sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
-                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
-                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
+                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=True), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p, inc=True), step)
                             # _ = input()
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)

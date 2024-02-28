@@ -199,6 +199,10 @@ class MelDataset(torch.utils.data.Dataset):
                 start_t = torch.clip(start_t, 0.0, 1.0)
                 end = torch.clip(end, 0.0, 1.0)
 
+                # increment
+                end = end - start_t
+                start_t[1:] = start_t[1:] - start_t[:-1]
+
         if self.train_mode == "S":
             data_point = dict(mel=mel,
                               pitch=token,

@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_layer2_S_new_seq_o&f_cnnonly_small_cnn",
+    "logdir": "runs/a2s_layer2_ST_new_seq_small_cnn_inc_time_sigmoid",
 
     "n_layers": 2,
 
@@ -11,8 +11,9 @@
     "epochs": 500,
     "loss_norm": 1,
     "time_loss_alpha": 20,
+    "enable_encoder": true,
 
-    "train_mode": "S",
+    "train_mode": "ST",
 
     "data_path": "/storageSSD/huiran/NoteTranscription/WebChorale"
 }
