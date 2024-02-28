@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_layer2_ST_new_seq_small_cnn_inc_time_sigmoid",
+    "logdir": "runs/a2s_layer2_ST_new_seq_small_cnn_inc_time_norm",
 
     "n_layers": 2,
 
@@ -15,5 +15,5 @@
 
     "train_mode": "ST",
 
-    "data_path": "/storageSSD/huiran/NoteTranscription/WebChorale"
+    "data_path": "/storageNVME/huiran/NoteTranscription/WebChorale"
 }

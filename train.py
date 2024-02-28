@@ -88,9 +88,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             device=device)
 
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=False,
-                              collate_fn=train_data.collate_fn, num_workers=4)
+                              collate_fn=train_data.collate_fn, num_workers=8)
     eval_loader = DataLoader(valid_data, 1, shuffle=False, drop_last=False,
-                             collate_fn=valid_data.collate_fn, num_workers=4)
+                             collate_fn=valid_data.collate_fn, num_workers=8)
 
     model = NoteTransformer(kernel_size=9,
                             d_model=256,
@@ -108,6 +108,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     model.train()
     step = 0
     max_pitch_prec = 0
+    torch.autograd.set_detect_anomaly(True)
     for e in range(epochs):
         itr = tqdm(train_loader)
         for x in itr:
@@ -269,22 +270,22 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         if i < 1:
                             b = begin_time
                             e = end_time
-                            if data_path.stem == "WebChorale":
+                            # if data_path.stem == "WebChorale":
                                 # WebChorale
-                                audio_path = Path("/storageSSD/huiran/WebChoralDataset/OneSong")
-                            else:
+                            #     audio_path = Path("/storageSSD/huiran/WebChoralDataset/OneSong")
+                            # else:
                                 # BachChorale
-                                audio_path = Path("/storageSSD/huiran/BachChorale/BachChorale")
-                            audio_f = audio_path / ("%s.flac" % fid)
-                            wav, sr = torchaudio.load(audio_f)
+                            #     audio_path = Path("/storageSSD/huiran/BachChorale/BachChorale")
+                            # audio_f = audio_path / ("%s.flac" % fid)
+                            # wav, sr = torchaudio.load(audio_f)
                             # print(sr)
-                            b = int(b * sr)
-                            e = int(e * sr)
-                            wav = wav.mean(dim=0)
-                            wav = wav[b:e]
-                            if len(wav) > 0:
-                                sw.add_audio("%d" % i, wav, step, sr)
-                                sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
+                            # b = int(b * sr)
+                            # e = int(e * sr)
+                            # wav = wav.mean(dim=0)
+                            # wav = wav[b:e]
+                            # if len(wav) > 0:
+                            #     sw.add_audio("%d" % i, wav, step, sr)
+                            #     sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
 
                             # for a_i, attn in enumerate(enc_attn):
