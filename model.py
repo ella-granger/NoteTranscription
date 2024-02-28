@@ -71,21 +71,24 @@ class ConvStack(nn.Module):
 
     def forward(self, mel):
         x = mel.view(mel.size(0), 1, mel.size(1), mel.size(2))
+        x = x.transpose(2,3)
         x = self.cnn(x)
         x = x.transpose(1, 2).flatten(-2)
         x = self.fc(x)
+        x = x.transpose(1, 2)
         return x
 
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, alpha=10):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, enable_encoder=True, alpha=10):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
+        self.enable_encoder = enable_encoder
 
         # ConvNet
-        """
+        # """
         padding_len = kernel_size // 2
         self.cnn = nn.Sequential(
             nn.Conv1d(N_MELS, d_model, kernel_size, padding=padding_len),
@@ -96,19 +99,19 @@ class NoteTransformer(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.1)
         )
-        """
-
-        self.cnn = ConvStack(N_MELS, d_model)
+        # """
+        # self.cnn = ConvStack(N_MELS, d_model)
 
         self.d_model = d_model
         # Encoder
-        self.encoder = Encoder(d_word_vec=d_model,
-                               n_layers=n_layers,
-                               n_head=N_HEAD,
-                               d_model=d_model,
-                               d_inner=d_inner,
-                               n_position=SEG_LEN,
-                               scale_emb=True)
+        if enable_encoder:
+            self.encoder = Encoder(d_word_vec=d_model,
+                                   n_layers=n_layers,
+                                   n_head=N_HEAD,
+                                   d_model=d_model,
+                                   d_inner=d_inner,
+                                   n_position=SEG_LEN,
+                                   scale_emb=True)
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model // 2, padding_idx=PAD_IDX)
@@ -141,15 +144,17 @@ class NoteTransformer(nn.Module):
         self.train_mode = train_mode
 
     def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False):
+        return_attns = return_attns & self.enable_encoder
         # mel feature extraction
         mel = self.cnn(mel)
         mel = torch.permute(mel, (0, 2, 1))
 
         # encoding
-        if return_attns:
-            enc, enc_attn = self.encoder(mel, return_attns=True)
-        else:
-            enc, *_ = self.encoder(mel)
+        if self.enable_encoder:
+            if return_attns:
+                mel, enc_attn = self.encoder(mel, return_attns=True)
+            else:
+                mel, *_ = self.encoder(mel)
 
         # decoding
         trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
@@ -179,9 +184,9 @@ class NoteTransformer(nn.Module):
             trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
 
         if return_attns:
-            dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, enc, return_attns=True)
+            dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, mel, return_attns=True)
         else:
-            dec, *_ = self.decoder(trg_seq, trg_mask, enc)
+            dec, *_ = self.decoder(trg_seq, trg_mask, mel)
 
         pitch_out = self.trg_pitch_prj(dec)
 
@@ -250,7 +255,8 @@ class NoteTransformer(nn.Module):
         mel = self.cnn(mel)
         mel = torch.permute(mel, (0, 2, 1))
 
-        enc, *_ = self.encoder(mel)
+        if self.enable_encoder:
+            mel, *_ = self.encoder(mel)
 
         trg_mask = get_pad_mask(pitch_i, PAD_IDX) & get_subsequent_mask(pitch_i)
 
@@ -287,7 +293,7 @@ class NoteTransformer(nn.Module):
         else:
             trg_seq = torch.cat([pitch_i, start_t_i, end_i, start_i, dur_i], dim=-1)
         
-        dec, *_ = self.decoder(trg_seq, trg_mask, enc)
+        dec, *_ = self.decoder(trg_seq, trg_mask, mel)
 
         pitch_out = self.trg_pitch_prj(dec)
 
