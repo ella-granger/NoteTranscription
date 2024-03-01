@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_layer2_ST_new_seq_small_cnn_inc_time_norm",
+    "logdir": "runs/a2s_layer2_ST_2cnn_schedule_sampling",
 
     "n_layers": 2,
 

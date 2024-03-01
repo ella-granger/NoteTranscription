@@ -39,11 +39,11 @@ def masked_l2(pred, gt, mask):
 
 
 def get_mix_t(step, k, epsilon):
-    return 1
-    if step < 30000:
+    # return 1
+    if step < 160000:
         t = 1
     else:
-        t = max(epsilon, 1 - k * (step - 30000))
+        t = max(epsilon, 1 - k * (step - 160000))
     return t
 
 
@@ -98,6 +98,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             n_layers=n_layers,
                             train_mode=train_mode,
                             enable_encoder=enable_encoder)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(total_params)
+    # exit()
     model = model.to(device)
 
     optimizer = ScheduledOptim(
@@ -140,12 +143,23 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 pitch_p, start_p, dur_p = result
                 start_t_p = None
                 end_p = None
+                pitch_p = pitch_p.detach()
+                start_p = start_p.detach()
+                dur_p = dur_p.detach()
             elif train_mode == "T":
                 pitch_p, start_t_p, end_p = result
                 start_p = None
                 dur_p = None
+                pitch_p = pitch_p.detach()
+                start_t_p = start_t_p.detach()
+                end_p = end_p.detach()
             else:
                 pitch_p, start_t_p, end_p, start_p, dur_p = result
+                pitch_p = pitch_p.detach()
+                start_t_p = start_t_p.detach()
+                end_p = end_p.detach()
+                start_p = start_p.detach()
+                dur_p = dur_p.detach()
                 
             optimizer.zero_grad()
             t = get_mix_t(step, mix_k, epsilon)
