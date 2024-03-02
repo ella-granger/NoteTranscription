@@ -19,7 +19,8 @@ ex = Experiment("text_transcription")
 @ex.config
 def cfg():
     # ckpt_id = "00120000"
-    ckpt_id = "best"
+    # ckpt_id = "best"
+    ckpt_id = "cur"
     mix_k = 0
     epsilon = 0
 
@@ -28,7 +29,7 @@ def cfg():
 def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
-        val_interval, loss_norm, time_loss_alpha, train_mode):
+         val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder):
     logdir = Path(logdir)
     print_config(ex.current_run)
 
@@ -43,7 +44,8 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
-                            train_mode=train_mode).to(device)
+                            train_mode=train_mode,
+                            enable_encoder=enable_encoder).to(device)
     ckpt_path = logdir / "ckpt" / ckpt_id
     ckpt_dict = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt_dict["model"])
@@ -70,7 +72,8 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             begin_time = x["begin_time"][0].item()
             end_time = x["end_time"][0].item()
 
-            print(pitch - 1 + MIN_MIDI)
+            # print(pitch - 1 + MIN_MIDI)
+            print(pitch)
             print(start)
             print(dur)
             print(fid, begin_time, end_time)
@@ -85,6 +88,16 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             else:
                 pitch_p, start_t_p, end_p, start_p, dur_p = result
 
+            print(pitch)
+            print(start_t)
+            print(pitch_p)
+            print(start_p)
+            print(dur_p)
+            print(start_t_p)
+            print(end_p)
+            print("------")
+            _ = input()
+
             if i < 5:
                 if "S" in train_mode:
                     pred_list = get_list_s(pitch_p, start_p, dur_p)
@@ -98,9 +111,9 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     pred_list = get_list_t(pitch_p, start_t_p, end_p)
                     gt_list = get_list_t(pitch, start_t, end)
                     
-                    fig_pred = plot_midi(*pred_list)
+                    fig_pred = plot_midi(*pred_list, inc=True)
                     fig_pred.savefig("pred/pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time))
-                    fig_gt = plot_midi(*gt_list)
+                    fig_gt = plot_midi(*gt_list, inc=True)
                     fig_gt.savefig("pred/gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time))
             else:
                 break

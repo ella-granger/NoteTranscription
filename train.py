@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
 import torch.nn.functional as F
+from torch.distribution.normal import Normal
 import torchaudio
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -26,9 +27,14 @@ def patch_trg(trg):
     return trg, gold
 
 
-def masked_l1(pred, gt, mask):
-    diff = pred - gt.unsqueeze(-1)
-    loss = torch.sum(torch.abs(diff[mask.unsqueeze(-1)]))
+def masked_normal_nll(pred, gt, mask):
+    dist = Normal(pred[:, :, 0], pred[:, :, 1])
+
+    p = dist.log_prob(gt)
+    loss = torch.sum(-p[mask])
+    
+    # diff = pred - gt.unsqueeze(-1)
+    # loss = torch.sum(torch.abs(diff[mask.unsqueeze(-1)]))
     return loss
 
 
@@ -59,6 +65,7 @@ def config():
     mix_k = 0.000003
     epsilon = 0.1
     enable_encoder = True
+    scheduled_sampling = False
 
 
 @ex.automain
@@ -66,7 +73,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, warmup_steps, mix_k, epsilon,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
-          loss_norm, time_loss_alpha, train_mode, enable_encoder):
+          loss_norm, time_loss_alpha, train_mode, enable_encoder,
+          scheduled_sampling):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -137,35 +145,38 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 start_t_i, start_t_o = patch_trg(start_t)
                 end_i, end_o = patch_trg(end)
 
+            if not scheduled_sampling:
+                optimizer.zero_grad()
             result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
 
-            if train_mode == "S":
-                pitch_p, start_p, dur_p = result
-                start_t_p = None
-                end_p = None
-                pitch_p = pitch_p.detach()
-                start_p = start_p.detach()
-                dur_p = dur_p.detach()
-            elif train_mode == "T":
-                pitch_p, start_t_p, end_p = result
-                start_p = None
-                dur_p = None
-                pitch_p = pitch_p.detach()
-                start_t_p = start_t_p.detach()
-                end_p = end_p.detach()
-            else:
-                pitch_p, start_t_p, end_p, start_p, dur_p = result
-                pitch_p = pitch_p.detach()
-                start_t_p = start_t_p.detach()
-                end_p = end_p.detach()
-                start_p = start_p.detach()
-                dur_p = dur_p.detach()
-                
-            optimizer.zero_grad()
-            t = get_mix_t(step, mix_k, epsilon)
-            result = model.forward_mix(mel, t,
-                                       pitch_p, start_p, dur_p, start_t_p, end_p,
-                                       pitch_i, start_i, dur_i, start_t_i, end_i)
+            if scheduled_sampling:
+                if train_mode == "S":
+                    pitch_p, start_p, dur_p = result
+                    start_t_p = None
+                    end_p = None
+                    pitch_p = pitch_p.detach()
+                    start_p = start_p.detach()
+                    dur_p = dur_p.detach()
+                elif train_mode == "T":
+                    pitch_p, start_t_p, end_p = result
+                    start_p = None
+                    dur_p = None
+                    pitch_p = pitch_p.detach()
+                    start_t_p = start_t_p.detach()
+                    end_p = end_p.detach()
+                else:
+                    pitch_p, start_t_p, end_p, start_p, dur_p = result
+                    pitch_p = pitch_p.detach()
+                    start_t_p = start_t_p.detach()
+                    end_p = end_p.detach()
+                    start_p = start_p.detach()
+                    dur_p = dur_p.detach()
+
+                optimizer.zero_grad()
+                t = get_mix_t(step, mix_k, epsilon)
+                result = model.forward_mix(mel, t,
+                                           pitch_p, start_p, dur_p, start_t_p, end_p,
+                                           pitch_i, start_i, dur_i, start_t_i, end_i)
 
             if train_mode == "S":
                 pitch_p, start_p, dur_p = result
@@ -184,17 +195,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             end_loss = 0
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             if "S" in train_mode:
-                # print(start_p.size())
-                # print(dur_p.size())
-                # print(start_o)
-                # print(dur_o)
-                # _ = input()
                 start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                 dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
             if "T" in train_mode:
                 seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
-                start_t_loss = time_loss_alpha * masked_l1(start_t_p, start_t_o, seq_mask)
-                end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
+                start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
+                end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
             
             loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
             loss.backward()
@@ -284,22 +290,22 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         if i < 1:
                             b = begin_time
                             e = end_time
-                            # if data_path.stem == "WebChorale":
+                            if data_path.stem == "WebChorale":
                                 # WebChorale
-                            #     audio_path = Path("/storageSSD/huiran/WebChoralDataset/OneSong")
-                            # else:
+                                audio_path = Path("/storageNVME/huiran/WebChoralDataset/OneSong")
+                            else:
                                 # BachChorale
-                            #     audio_path = Path("/storageSSD/huiran/BachChorale/BachChorale")
-                            # audio_f = audio_path / ("%s.flac" % fid)
-                            # wav, sr = torchaudio.load(audio_f)
-                            # print(sr)
-                            # b = int(b * sr)
-                            # e = int(e * sr)
-                            # wav = wav.mean(dim=0)
-                            # wav = wav[b:e]
-                            # if len(wav) > 0:
-                            #     sw.add_audio("%d" % i, wav, step, sr)
-                            #     sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
+                                audio_path = Path("/storageNVME/huiran/BachChorale/BachChorale")
+                            audio_f = audio_path / ("%s.flac" % fid)
+                            wav, sr = torchaudio.load(audio_f)
+                            print(sr)
+                            b = int(b * sr)
+                            e = int(e * sr)
+                            wav = wav.mean(dim=0)
+                            wav = wav[b:e]
+                            if len(wav) > 0:
+                                sw.add_audio("%d" % i, wav, step, sr)
+                                sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
 
                             # for a_i, attn in enumerate(enc_attn):
@@ -330,8 +336,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("t/%d/gt" % i, str(gt_list), step)
                                 sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
-                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=True), step)
-                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p, inc=True), step)
+                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
                             # _ = input()
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)

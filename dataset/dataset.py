@@ -159,7 +159,7 @@ class MelDataset(torch.utils.data.Dataset):
             
             mel = mel[:, begin_idx:end_idx]
             token.insert(0, MAX_MIDI+1)
-            token.append(MAX_MIDI+1)
+            token.append(MAX_MIDI+2)
             token = torch.LongTensor(token)
             token[token>0] = token[token>0] - MIN_MIDI + 1
 
@@ -200,8 +200,8 @@ class MelDataset(torch.utils.data.Dataset):
                 end = torch.clip(end, 0.0, 1.0)
 
                 # increment
-                end = end - start_t
-                start_t[1:] = start_t[1:] - start_t[:-1]
+                # end = end - start_t
+                # start_t[1:] = start_t[1:] - start_t[:-1]
 
         if self.train_mode == "S":
             data_point = dict(mel=mel,

@@ -138,8 +138,8 @@ class NoteTransformer(nn.Module):
             self.trg_start_s_prj = nn.Linear(d_model, MAX_START+2)
             self.trg_dur_s_prj = nn.Linear(d_model, MAX_DUR+1)
         if "T" in train_mode:
-            self.trg_start_t_prj = nn.Linear(d_model, 1)
-            self.trg_end_prj = nn.Linear(d_model, 1)
+            self.trg_start_t_prj = nn.Linear(d_model, 2) # mu, std
+            self.trg_end_prj = nn.Linear(d_model, 2) # mu, std
 
         self.train_mode = train_mode
 
@@ -195,8 +195,9 @@ class NoteTransformer(nn.Module):
             dur_out = self.trg_dur_s_prj(dec)
         if "T" in self.train_mode:
             start_t_out = self.trg_start_t_prj(dec)
-            start_t_out = F.sigmoid(start_t_out)
             end_out = self.trg_end_prj(dec)
+            
+            start_t_out = F.sigmoid(start_t_out)
             end_out = F.sigmoid(end_out)
         
         # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
@@ -321,7 +322,7 @@ class NoteTransformer(nn.Module):
 
         enc, *_ = self.encoder(mel)
 
-        MAX_LEN = 800
+        MAX_LEN = 100
         pitch = torch.zeros((1, MAX_LEN), dtype=int).to(device)
         start_t = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
         end = torch.zeros((1, MAX_LEN, 1), dtype=torch.float64).to(device)
@@ -332,6 +333,9 @@ class NoteTransformer(nn.Module):
 
         for i in range(MAX_LEN-1):
             mask[:, :, i] = True
+            print(mask)
+            print(pitch)
+            # _ = input()
 
             pitch_emb = self.trg_pitch_emb(pitch)
             if "T" in self.train_mode:
@@ -377,23 +381,18 @@ class NoteTransformer(nn.Module):
             # print(pitch[:, :i+1])
             # _ = input()
 
-        pitch = pitch[:, 1:i]
+        pitch = pitch[:, 1:i+1]
         if "S" in self.train_mode:
-            start = start[:, 1:i]
-            dur = dur[:, 1:i]
+            start = start[:, 1:i+1]
+            dur = dur[:, 1:i+1]
         if "T" in self.train_mode:
-            start_t = start_t[:, 1:i, 0]
-            end = end[:, 1:i, 0]
+            start_t = start_t[:, 1:i+1, 0]
+            end = end[:, 1:i+1, 0]
 
         if self.train_mode == "T":
             return pitch, start_t, end
         elif self.train_mode == "S":
             return pitch, start, dur
         else:
-            print("------")
-            print(pitch)
-            print(start)
-            print(dur)
-            _ = input()
             return pitch, start_t, end, start, dur
         

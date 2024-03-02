@@ -1,7 +1,7 @@
 {
-    "logdir": "runs/a2s_layer2_ST_2cnn_schedule_sampling",
+    "logdir": "runs/a2s_layer6_T_2cnn_schedule_sampling",
 
-    "n_layers": 2,
+    "n_layers": 6,
 
     "batch_size": 4,
 
@@ -13,7 +13,7 @@
     "time_loss_alpha": 20,
     "enable_encoder": true,
 
-    "train_mode": "ST",
+    "train_mode": "T",
 
     "data_path": "/storageNVME/huiran/NoteTranscription/WebChorale"
 }
