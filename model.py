@@ -27,7 +27,7 @@ class TimeEncoding(nn.Module):
     def forward(self, x):
         # x: (B, L, 1) ~ (0, 1)
         # enc = 200 * x
-        enc = enc.repeat(1, 1, self.d_hid)
+        enc = x.repeat(1, 1, self.d_hid)
 
         for j in range(self.d_hid):
             a = (j // 2) * 2 * np.pi

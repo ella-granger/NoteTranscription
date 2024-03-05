@@ -1,5 +1,5 @@
 {
-    "logdir": "runs/a2s_layer2_ST_2cnn_small_gaussian_nll",
+    "logdir": "runs/a2s_layer2_ST_sine_enc_2cnn_small_gaussian_nll",
 
     "n_layers": 2,
 
