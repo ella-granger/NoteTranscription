@@ -119,7 +119,7 @@ class Decoder(nn.Module):
         if self.scale_emb:
             dec_output *= self.d_model ** 0.5
         dec_output = self.dropout(self.position_enc(dec_output))
-        dec_output = self.dropout(dec_output)
+        # dec_output = self.dropout(dec_output)
         dec_output = self.layer_norm(dec_output)
 
         for dec_layer in self.layer_stack:

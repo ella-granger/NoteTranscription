@@ -26,12 +26,14 @@ class TimeEncoding(nn.Module):
 
     def forward(self, x):
         # x: (B, L, 1) ~ (0, 1)
-        enc = 200 * x
+        # enc = 200 * x
         enc = enc.repeat(1, 1, self.d_hid)
 
         for j in range(self.d_hid):
-            div = np.power(10000, 2 * (j // 2) / self.d_hid)
-            enc[:, :, j] = enc[:, :, j] / div
+            a = (j // 2) * 2 * np.pi
+            enc[:, :, j] = enc[:, :, j] * a
+            # div = np.power(10000, 2 * (j // 2) / self.d_hid)
+            # enc[:, :, j] = enc[:, :, j] / div
 
         enc[:, :, 0::2] = torch.sin(enc[:, :, 0::2])
         enc[:, :, 1::2] = torch.cos(enc[:, :, 1::2])
@@ -119,9 +121,10 @@ class NoteTransformer(nn.Module):
             self.trg_start_emb = nn.Embedding(MAX_START+2, d_model // 4 // len(train_mode), padding_idx=MAX_START+1)
             self.trg_dur_emb = nn.Embedding(MAX_DUR+1, d_model // 4 // len(train_mode), padding_idx=0)
         if "T" in train_mode:
-            # self.time_enc = TimeEncoding(d_model // 8)
-            self.start_prj = nn.Linear(1, d_model // 4 // len(train_mode))
-            self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
+            self.start_prj = TimeEncoding(d_model // 4 // len(train_mode))
+            self.end_prj = TimeEncoding(d_model // 4 // len(train_mode))
+            # self.start_prj = nn.Linear(1, d_model // 4 // len(train_mode))
+            # self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
