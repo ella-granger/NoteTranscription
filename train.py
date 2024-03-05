@@ -120,15 +120,24 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     print(total_params)
     # exit()
     model = model.to(device)
-
+    
     optimizer = ScheduledOptim(
         optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
         2.0, 256, warmup_steps)
 
-    
-    model.train()
     step = 0
     max_pitch_prec = 0
+    
+    ckpt_path = logdir / "ckpt" / "cur"
+    if ckpt_path.exists():
+        ckpt_dict = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(ckpt_dict["model"])
+        step = ckpt_dict["step"]
+        max_pitch_prec = ckpt_dict["max_pitch_prec"]
+        optimizer._optimizer.load_state_dict(ckpt_dict["optim"])
+        optimizer.n_steps = step
+    
+    model.train()
     torch.autograd.set_detect_anomaly(True)
     for e in range(epochs):
         itr = tqdm(train_loader)
@@ -394,7 +403,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 obj = {"model": model.state_dict(),
                        "optim": optimizer._optimizer.state_dict(),
                        "steps": step,
-                       "epoch": e}
+                       "epoch": e,
+                       "max_pitch_prec": max_pitch_prec}
                 torch.save(obj, str(save_path))
 
                 if total_T / total_C > max_pitch_prec:
