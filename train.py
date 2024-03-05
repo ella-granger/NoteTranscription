@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
 import torch.nn.functional as F
-from torch.distribution.normal import Normal
+from torch.distributions.normal import Normal
 import torchaudio
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -28,14 +28,23 @@ def patch_trg(trg):
 
 
 def masked_normal_nll(pred, gt, mask):
-    dist = Normal(pred[:, :, 0], pred[:, :, 1])
+    batch_sum = 0
+    for i in range(gt.size(0)):
+        mu = pred[i, :, 0][mask[i]]
+        var = pred[i, :, 1][mask[i]]
+        tar = gt[i, :][mask[i]]
+        # print(mask[i])
+        # print(mu)
+        # print(var)
+        # print(tar)
+        batch = F.gaussian_nll_loss(mu, tar, var, reduction="sum")
+        # print(batch)
+        # print(F.gaussian_nll_loss(mu, tar, var, reduction="mean"))
+        # print(F.gaussian_nll_loss(mu, tar, var, reduction="none"))
+        # _ = input()
+        batch_sum += batch
 
-    p = dist.log_prob(gt)
-    loss = torch.sum(-p[mask])
-    
-    # diff = pred - gt.unsqueeze(-1)
-    # loss = torch.sum(torch.abs(diff[mask.unsqueeze(-1)]))
-    return loss
+    return batch_sum
 
 
 def masked_l2(pred, gt, mask):
@@ -55,6 +64,7 @@ def get_mix_t(step, k, epsilon):
 
 @ex.config
 def config():
+    # default settings, will be changed by configuration json
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     output_interval = 5
     summary_interval = 20
@@ -219,7 +229,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
                     sw.add_scalar("training/end_loss", end_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
-                sw.add_scalar("training/mix_t", t, step)
+                # sw.add_scalar("training/mix_t", t, step)
 
             if step % val_interval == 0:
                 model.eval()
@@ -282,8 +292,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         if "T" in train_mode:
                             seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
 
-                            start_t_loss = time_loss_alpha * masked_l1(start_t_p, start_t_o, seq_mask)
-                            end_loss = time_loss_alpha * masked_l1(end_p, end_o, seq_mask)
+                            start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
+                            end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
             
                         loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
 
@@ -292,7 +302,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             e = end_time
                             if data_path.stem == "WebChorale":
                                 # WebChorale
-                                audio_path = Path("/storageNVME/huiran/WebChoralDataset/OneSong")
+                                audio_path = Path("/storageNVME/huiran/WebChoraleDataset/OneSong")
                             else:
                                 # BachChorale
                                 audio_path = Path("/storageNVME/huiran/BachChorale/BachChorale")

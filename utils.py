@@ -86,7 +86,7 @@ def get_list_t(pitch, start, end):
 
     if len(pitch.shape) > 1:
         pitch = np.argmax(pitch, axis=1, keepdims=False)
-        start = start[:, :, 0].reshape(-1)
-        end = end[:, :, 0].reshape(-1)
+        start = start[:, 0].reshape(-1)
+        end = end[:, 0].reshape(-1)
 
     return pitch.tolist(), start.tolist(), end.tolist()

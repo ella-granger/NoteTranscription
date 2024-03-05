@@ -1,7 +1,7 @@
 {
-    "logdir": "runs/a2s_layer6_T_2cnn_schedule_sampling",
+    "logdir": "runs/a2s_layer2_ST_2cnn_small_gaussian_nll",
 
-    "n_layers": 6,
+    "n_layers": 2,
 
     "batch_size": 4,
 
@@ -10,10 +10,11 @@
     "clip_gradient_norm": false,
     "epochs": 500,
     "loss_norm": 1,
-    "time_loss_alpha": 20,
+    "time_loss_alpha": 0.1,
     "enable_encoder": true,
+    "scheduled_sampling": false,
 
-    "train_mode": "T",
+    "train_mode": "ST",
 
     "data_path": "/storageNVME/huiran/NoteTranscription/WebChorale"
 }
