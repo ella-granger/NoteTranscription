@@ -27,7 +27,7 @@ class TimeEncoding(nn.Module):
     def forward(self, x):
         # x: (B, L, 1) ~ (0, 1)
         # enc = 200 * x
-        enc = enc.repeat(1, 1, self.d_hid)
+        enc = x.repeat(1, 1, self.d_hid)
 
         for j in range(self.d_hid):
             a = (j // 2) * 2 * np.pi
@@ -336,8 +336,8 @@ class NoteTransformer(nn.Module):
 
         for i in range(MAX_LEN-1):
             mask[:, :, i] = True
-            print(mask)
-            print(pitch)
+            # print(mask)
+            # print(pitch)
             # _ = input()
 
             pitch_emb = self.trg_pitch_emb(pitch)
@@ -364,7 +364,7 @@ class NoteTransformer(nn.Module):
             if "T" in self.train_mode:
                 start_t_out = self.trg_start_t_prj(dec)
                 end_out = self.trg_end_prj(dec)
-                start_t_out = F.sigmoid(start_out)
+                start_t_out = F.sigmoid(start_t_out)
                 end_out = F.sigmoid(end_out)
 
             pitch_pred = torch.argmax(pitch_out[:, i, :])
