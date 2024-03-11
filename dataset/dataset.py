@@ -200,7 +200,7 @@ class MelDataset(torch.utils.data.Dataset):
                 end = torch.clip(end, 0.0, 1.0)
 
                 # increment
-                # end = end - start_t
+                end = end - start_t
                 # start_t[1:] = start_t[1:] - start_t[:-1]
 
         if self.train_mode == "S":
