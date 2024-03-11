@@ -31,8 +31,8 @@ def plot_midi(pitch, start, end, inc=False):
 
     if inc:
         for i in range(len(start)):
-            if i > 0:
-                start[i] += start[i-1]
+            # if i > 0:
+            #     start[i] += start[i-1]
             end[i] += start[i]
 
     fig, ax = plt.subplots(figsize=(10, 4))

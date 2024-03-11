@@ -355,8 +355,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("t/%d/gt" % i, str(gt_list), step)
                                 sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
-                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o), step)
-                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p), step)
+                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=True), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p, inc=True), step)
                             # _ = input()
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)
