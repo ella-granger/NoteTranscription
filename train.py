@@ -132,7 +132,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     if ckpt_path.exists():
         ckpt_dict = torch.load(ckpt_path, map_location=device)
         model.load_state_dict(ckpt_dict["model"])
-        step = ckpt_dict["step"]
+        step = ckpt_dict["steps"]
         max_pitch_prec = ckpt_dict["max_pitch_prec"]
         optimizer._optimizer.load_state_dict(ckpt_dict["optim"])
         optimizer.n_steps = step
