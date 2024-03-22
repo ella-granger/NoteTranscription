@@ -211,10 +211,12 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
          val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder,
-         scheduled_sampling):
+         scheduled_sampling, prob_model):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
+
+    data_path = "./dataset/test/BachChorale"
 
     data_path = Path(data_path)
     test_data = MelDataset(data_path / "mel",
@@ -229,7 +231,8 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                             d_inner=512,
                             n_layers=n_layers,
                             train_mode=train_mode,
-                            enable_encoder=enable_encoder).to(device)
+                            enable_encoder=enable_encoder,
+                            prob_model=prob_model).to(device)
     ckpt_path = logdir / "ckpt" / ckpt_id
     ckpt_dict = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt_dict["model"])
