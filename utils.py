@@ -26,6 +26,8 @@ def plot_spec(spec):
 
 
 def plot_midi(pitch, start, end, inc=False):
+    # print(start, end)
+    # _ = input()
     if type(pitch) != list:
         pitch, start, end = get_list_t(pitch, start, end)
 
@@ -35,6 +37,8 @@ def plot_midi(pitch, start, end, inc=False):
             #     start[i] += start[i-1]
             end[i] += start[i]
 
+    # print(start, end)
+    # _ = input()
     fig, ax = plt.subplots(figsize=(10, 4))
     for n, s, e in zip(pitch, start, end):
         if s <= e and n > 0:
@@ -79,14 +83,32 @@ def get_list_s(pitch, start, end):
     return pitch.tolist(), start.tolist(), end.tolist()
 
 
-def get_list_t(pitch, start, end):
+def beta_mode(alpha, beta):
+    result = (alpha - 1) / (alpha + beta - 2)
+    alpha_mask = alpha < 1
+    beta_mask = beta < 1
+
+    zero_mask = alpha_mask * (1 - beta_mask)
+    one_mask = beta_mask * (1 - alpha_mask)
+
+    result[zero_mask.astype(bool)] = 0
+    result[alpha_mask.astype(bool)] = 1
+
+    return result
+
+
+def get_list_t(pitch, start, end, mode="gaussian"):
     pitch = pitch.detach().cpu().numpy()[0]
     start = start.detach().cpu().numpy()[0]
     end = end.detach().cpu().numpy()[0]
 
     if len(pitch.shape) > 1:
         pitch = np.argmax(pitch, axis=1, keepdims=False)
-        start = start[:, 0].reshape(-1)
-        end = end[:, 0].reshape(-1)
+        if mode == "gaussian" or mode == "l2" or mode == "l1":
+            start = start[:, 0].reshape(-1)
+            end = end[:, 0].reshape(-1)
+        elif mode == "beta":
+            start = beta_mode(start[:, 0], start[:, 1]).reshape(-1)
+            end = beta_mode(end[:, 0], end[:, 1]).reshape(-1)
 
     return pitch.tolist(), start.tolist(), end.tolist()

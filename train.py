@@ -8,6 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch import optim
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
+from torch.distributions.beta import Beta
 import torchaudio
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -25,6 +26,29 @@ def patch_trg(trg):
     gold = trg[:, 1:].contiguous()
     trg = trg[:, :-1]
     return trg, gold
+
+
+def masked_beta_nll(pred, gt, mask):
+    batch_sum = 0
+    epsilon = 1e-6
+    for i in range(gt.size(0)):
+        alpha = pred[i, :, 0][mask[i]]
+        beta = pred[i, :, 1][mask[i]]
+        # print("alpha")
+        # print(alpha)
+        # print("beta")
+        # print(beta)
+        tar = gt[i, :][mask[i]]
+        # print("tar")
+        # print(tar)
+        tar[tar == 0] = epsilon
+        tar[tar == 1] = 1 - epsilon
+        
+        dist = Beta(alpha, beta)
+        lp = dist.log_prob(tar)
+        batch_sum -= lp.sum()
+
+    return batch_sum
 
 
 def masked_normal_nll(pred, gt, mask):
@@ -47,9 +71,14 @@ def masked_normal_nll(pred, gt, mask):
     return batch_sum
 
 
-def masked_l2(pred, gt, mask):
+def masked_l2_loss(pred, gt, mask):
     diff = pred - gt.unsqueeze(-1)
     loss = torch.sum(diff[mask.unsqueeze(-1)] ** 2)
+    return loss
+
+def masked_l1_loss(pred, gt, mask):
+    diff = pred - gt.unsqueeze(-1)
+    loss = torch.sum(torch.abs(diff[mask.unsqueeze(-1)]))
     return loss
 
 
@@ -66,6 +95,7 @@ def get_mix_t(step, k, epsilon):
 def config():
     # default settings, will be changed by configuration json
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    prob_model = "gaussian"
     output_interval = 5
     summary_interval = 20
     val_interval = 1000
@@ -84,7 +114,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, train_mode, enable_encoder,
-          scheduled_sampling):
+          scheduled_sampling, prob_model):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -115,7 +145,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             d_inner=512,
                             n_layers=n_layers,
                             train_mode=train_mode,
-                            enable_encoder=enable_encoder)
+                            enable_encoder=enable_encoder,
+                            prob_model=prob_model)
     total_params = sum(p.numel() for p in model.parameters())
     print(total_params)
     # exit()
@@ -218,8 +249,20 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
             if "T" in train_mode:
                 seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
-                start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
-                end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
+                if prob_model == "beta":
+                    # print("start")
+                    start_t_loss = time_loss_alpha * masked_beta_nll(start_t_p, start_t_o, seq_mask)
+                    # print("end")
+                    end_loss = time_loss_alpha * masked_beta_nll(end_p, end_o, seq_mask)
+                elif prob_model == "gaussian":
+                    start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
+                    end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
+                elif prob_model == "l1":
+                    start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
+                    end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
+                elif prob_model == "l2":
+                    start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
+                    end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
             
             loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
             loss.backward()
@@ -301,8 +344,18 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         if "T" in train_mode:
                             seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
 
-                            start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
-                            end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
+                            if prob_model == "beta":
+                                start_t_loss = time_loss_alpha * masked_beta_nll(start_t_p, start_t_o, seq_mask)
+                                end_loss = time_loss_alpha * masked_beta_nll(end_p, end_o, seq_mask)
+                            elif prob_model == "gaussian":
+                                start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
+                                end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
+                            elif prob_model == "l2":
+                                start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
+                                end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
+                            elif prob_model == "l1":
+                                start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
+                                end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
                         loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
 
@@ -346,8 +399,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_figure("gt/s_%d" % i, plot_score(pitch_o, start_o, dur_o), step)
                                 sw.add_figure("pred/s_%d" % i, plot_score(pitch_p, start_p, dur_p), step)
                             if "T" in train_mode:
-                                pred_list = get_list_t(pitch_p, start_t_p, end_p)
-                                gt_list = get_list_t(pitch_o, start_t_o, end_o)
+                                pred_list = get_list_t(pitch_p, start_t_p, end_p, mode=prob_model)
+                                gt_list = get_list_t(pitch_o, start_t_o, end_o, mode=prob_model)
 
                                 pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                                 gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
@@ -356,7 +409,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
                                 sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=True), step)
-                                sw.add_figure("pred/t_%d" % i, plot_midi(pitch_p, start_t_p, end_p, inc=True), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi([x[0] for x in pred_list], [x[1] for x in pred_list], [x[2] for x in pred_list], inc=True), step)
                             # _ = input()
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)

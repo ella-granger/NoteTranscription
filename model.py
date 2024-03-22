@@ -84,11 +84,12 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, enable_encoder=True, alpha=10):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, enable_encoder=True, alpha=10, prob_model="gaussian"):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
         self.enable_encoder = enable_encoder
+        self.prob_model = prob_model
 
         # ConvNet
         # """
@@ -142,8 +143,12 @@ class NoteTransformer(nn.Module):
             self.trg_start_s_prj = nn.Linear(d_model, MAX_START+2)
             self.trg_dur_s_prj = nn.Linear(d_model, MAX_DUR+1)
         if "T" in train_mode:
-            self.trg_start_t_prj = nn.Linear(d_model, 2) # mu, std
-            self.trg_end_prj = nn.Linear(d_model, 2) # mu, std
+            if prob_model in ["gaussian", "beta"]:
+                self.trg_start_t_prj = nn.Linear(d_model, 2) # mu, std
+                self.trg_end_prj = nn.Linear(d_model, 2) # mu, std
+            elif prob_model in ["l1", "l2"]:
+                self.trg_start_t_prj = nn.Linear(d_model, 1)
+                self.trg_end_prj = nn.Linear(d_model, 1)
 
         self.train_mode = train_mode
 
@@ -203,6 +208,8 @@ class NoteTransformer(nn.Module):
             
             start_t_out = F.sigmoid(start_t_out)
             end_out = F.sigmoid(end_out)
+            # start_t_out = F.elu(start_t_out) + 2
+            # end_out = F.elu(end_out) + 2
         
         # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
         # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])

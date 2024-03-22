@@ -186,7 +186,7 @@ class MelDataset(torch.utils.data.Dataset):
                 else:
                     start_t.append(max(end))
                 end.insert(0, begin_time)
-                if len(end) == 0:
+                if len(end) == 1:
                     end.append(end_time)
                 else:
                     end.append(max(end))
