@@ -45,6 +45,9 @@ def plot_midi(pitch, start, end, inc=False):
             ax.hlines(n, s, e, linewidths=3)
         if n == 0:
             ax.vlines(s, min(pitch), max(pitch), linestyles="--", linewidths=2)
+
+    ax.scatter(start, pitch)
+    ax.scatter(end, pitch, marker="x")
     fig.canvas.draw()
     plt.close()
     return fig
