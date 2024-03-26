@@ -71,6 +71,24 @@ def masked_normal_nll(pred, gt, mask):
     return batch_sum
 
 
+def masked_diou_loss(start_t_p, dur_p, start_t_g, dur_g, mask):
+    batch_sum = 0
+    for i in range(start_t_p.size(0)):
+        l_p = start_t_p[i, :, 0][mask[i]]
+        r_p = l_p + dur_p[i, :, 0][mask[i]]
+        l_g = start_t_g[i, :, 0][mask[i]]
+        r_g = l_g + dur_g[i, :, 0][mask[i]]
+
+        c = torch.max(r_p, r_g) - torch.min(l_p, l_g)
+        inter = torch.min(r_p, r_g) - torch.max(l_p, l_g)
+        inter[inter < 0] = 0
+        d = torch.abs((l_p + r_p) / 2 - (l_g + r_g) / 2)
+
+        batch_sum += torch.sum(1 - inter / c + (d/c) ** 2) 
+        
+    return batch_sum
+
+
 def masked_l2_loss(pred, gt, mask):
     diff = pred - gt.unsqueeze(-1)
     loss = torch.sum(diff[mask.unsqueeze(-1)] ** 2)
@@ -263,6 +281,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 elif prob_model == "l2":
                     start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
+                elif prob_model == "diou":
+                    start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
+                    end_loss = 0
             
             loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
             loss.backward()
@@ -356,6 +377,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             elif prob_model == "l1":
                                 start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
+                            elif prob_model == "diou":
+                                start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
+                                end_loss = 0
             
                         loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
 

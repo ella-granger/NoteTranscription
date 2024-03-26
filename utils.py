@@ -107,7 +107,7 @@ def get_list_t(pitch, start, end, mode="gaussian"):
 
     if len(pitch.shape) > 1:
         pitch = np.argmax(pitch, axis=1, keepdims=False)
-        if mode == "gaussian" or mode == "l2" or mode == "l1":
+        if mode == "gaussian" or mode == "l2" or mode == "l1" or mode == "diou":
             start = start[:, 0].reshape(-1)
             end = end[:, 0].reshape(-1)
         elif mode == "beta":
