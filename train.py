@@ -288,6 +288,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 elif prob_model == "l1":
                     start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
+                    start_diff_p = start_t_p[:, 1:, :] - start_t_p[:, :-1, :]
+                    start_diff_o = start_t_o[:, 1:] - start_t_o[:, :-1]
+                    start_diff_loss = time_loss_alpha * masked_l2_loss(start_diff_p, start_diff_o, seq_mask[:, 1:])
                 elif prob_model == "l2":
                     start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
@@ -296,6 +299,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     end_loss = 0
             
             loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
+            if prob_model == "l1":
+                loss += start_diff_loss
             loss.backward()
             optimizer.step_and_update_lr()
 
@@ -314,6 +319,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     else:
                         sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
                         sw.add_scalar("training/end_loss", end_loss.item(), step)
+                        if prob_model == "l1":
+                            sw.add_scalar("training/start_diff_loss", start_diff_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
                 # sw.add_scalar("training/mix_t", t, step)
 
