@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchinfo import summary
 import numpy as np
 from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_mask
 from dataset.constants import *
@@ -153,10 +154,12 @@ class NoteTransformer(nn.Module):
 
         self.train_mode = train_mode
 
-    def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False):
+    def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False, return_cnn=False):
         return_attns = return_attns & self.enable_encoder
         # mel feature extraction
         mel = self.cnn(mel)
+        if return_cnn:
+            self.mel_result = mel
         mel = torch.permute(mel, (0, 2, 1))
 
         # encoding
@@ -468,3 +471,16 @@ class NoteTransformer(nn.Module):
         else:
             return pitch, start_t, end, start, dur
         
+
+
+if __name__ == "__main__":
+    model = NoteTransformer(kernel_size=9,
+                            d_model=256,
+                            d_inner=512,
+                            n_layers=2,
+                            seg_len=320,
+                            train_mode="T",
+                            enable_encoder=True,
+                            prob_model="l1")
+
+    summary(model)
