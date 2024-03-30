@@ -51,11 +51,14 @@ def masked_beta_nll(pred, gt, mask):
     return batch_sum
 
 
-def masked_normal_nll(pred, gt, mask):
+def masked_normal_nll(pred, gt, mask, fix_var=None):
     batch_sum = 0
     for i in range(gt.size(0)):
         mu = pred[i, :, 0][mask[i]]
-        var = pred[i, :, 1][mask[i]]
+        if fix_var is None:
+            var = pred[i, :, 1][mask[i]]
+        else:
+            var = torch.ones_like(mu).to(mu.device) * fix_var
         tar = gt[i, :][mask[i]]
         # print(mask[i])
         # print(mu)
@@ -76,8 +79,8 @@ def masked_diou_loss(start_t_p, dur_p, start_t_g, dur_g, mask):
     for i in range(start_t_p.size(0)):
         l_p = start_t_p[i, :, 0][mask[i]]
         r_p = l_p + dur_p[i, :, 0][mask[i]]
-        l_g = start_t_g[i, :, 0][mask[i]]
-        r_g = l_g + dur_g[i, :, 0][mask[i]]
+        l_g = start_t_g[i, :][mask[i]]
+        r_g = l_g + dur_g[i, :][mask[i]]
 
         c = torch.max(r_p, r_g) - torch.min(l_p, l_g)
         inter = torch.min(r_p, r_g) - torch.max(l_p, l_g)
@@ -122,6 +125,7 @@ def config():
     train_mode = "TS"
     mix_k = 0.000003
     epsilon = 0.1
+    loss_norm = 1
     enable_encoder = True
     scheduled_sampling = False
 
@@ -132,7 +136,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, train_mode, enable_encoder,
-          scheduled_sampling, prob_model):
+          scheduled_sampling, prob_model, seg_len):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -145,12 +149,14 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             data_path / "note",
                             data_path / "train.json",
                             train_mode,
+                            seg_len=seg_len,
                             device=device)
 
     valid_data = MelDataset(data_path / "mel",
                             data_path / "note",
                             data_path / "valid.json",
                             train_mode,
+                            seg_len=seg_len,
                             device=device)
 
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=False,
@@ -162,6 +168,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
+                            seg_len=seg_len,
                             train_mode=train_mode,
                             enable_encoder=enable_encoder,
                             prob_model=prob_model)
@@ -275,6 +282,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 elif prob_model == "gaussian":
                     start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
+                elif prob_model == "gaussian-mu":
+                    start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask, 0.05)
+                    end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask, 0.05)
                 elif prob_model == "l1":
                     start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
@@ -299,8 +309,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("training/start_loss", start_loss.item(), step)
                     sw.add_scalar("training/dur_loss", dur_loss.item(), step)
                 if "T" in train_mode:
-                    sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
-                    sw.add_scalar("training/end_loss", end_loss.item(), step)
+                    if prob_model == "diou":
+                        sw.add_scalar("training/diou_loss", start_t_loss.item(), step)
+                    else:
+                        sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
+                        sw.add_scalar("training/end_loss", end_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
                 # sw.add_scalar("training/mix_t", t, step)
 
@@ -371,6 +384,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             elif prob_model == "gaussian":
                                 start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
                                 end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
+                            elif prob_model == "gaussian-mu":
+                                start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask, 0.05)
+                                end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask, 0.05)
                             elif prob_model == "l2":
                                 start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
                                 end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
@@ -379,7 +395,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
                             elif prob_model == "diou":
                                 start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
-                                end_loss = 0
+                                end_loss = torch.zeros(1).to(device)
             
                         loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
 
@@ -466,8 +482,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 if "T" in train_mode:
                     eval_start_t_loss = total_start_t_loss / total_count
                     eval_end_loss = total_end_loss / total_count
-                    sw.add_scalar("eval/start_t_loss", eval_start_t_loss, step)
-                    sw.add_scalar("eval/end_loss", eval_end_loss, step)
+                    if prob_model == "diou":
+                        sw.add_scalar("eval/diou_loss", eval_start_t_loss, step)
+                    else:
+                        sw.add_scalar("eval/start_t_loss", eval_start_t_loss, step)
+                        sw.add_scalar("eval/end_loss", eval_end_loss, step)
                 sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
                 if "S" in train_mode:
                     sw.add_scalar("eval/start_prec", total_start_T / total_C, step)

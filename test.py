@@ -40,7 +40,7 @@ def merge_notes(note_list):
     return result
 
 
-def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
+def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len):
     pitch = pitch.detach().cpu().numpy()[0]
     start_t = start_t.detach().cpu().numpy()[0]
     end = end.detach().cpu().numpy()[0]
@@ -48,7 +48,7 @@ def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
     start_t_p = start_t_p.detach().cpu().numpy()[0]
     end_p = end_p.detach().cpu().numpy()[0]
     
-    scaling = HOP_LENGTH / SAMPLE_RATE * SEG_LEN
+    scaling = HOP_LENGTH / SAMPLE_RATE * seg_len
     p_est = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch_p])
     p_ref = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch])
     i_est = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t_p, end_p)]).reshape(-1, 2)
@@ -204,6 +204,7 @@ def cfg():
     # ckpt_id = "cur"
     mix_k = 0
     epsilon = 0
+    seg_len = SEG_LEN
 
 
 @ex.automain
@@ -211,7 +212,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
          val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder,
-         scheduled_sampling, prob_model):
+         scheduled_sampling, prob_model, seg_len):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
@@ -302,7 +303,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # _ = input()
 
             frame, _, _ = cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p)
-            metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p)
+            metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
             print(metrics)
             for k, v in metrics.items():
                 mets[k].append(v)

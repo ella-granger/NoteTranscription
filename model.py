@@ -84,12 +84,13 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, enable_encoder=True, alpha=10, prob_model="gaussian"):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
         self.enable_encoder = enable_encoder
         self.prob_model = prob_model
+        self.seg_len = seg_len
 
         # ConvNet
         # """
@@ -114,7 +115,7 @@ class NoteTransformer(nn.Module):
                                    n_head=N_HEAD,
                                    d_model=d_model,
                                    d_inner=d_inner,
-                                   n_position=SEG_LEN,
+                                   n_position=self.seg_len,
                                    scale_emb=True)
 
         # Decoder
@@ -146,7 +147,7 @@ class NoteTransformer(nn.Module):
             if prob_model in ["gaussian", "beta"]:
                 self.trg_start_t_prj = nn.Linear(d_model, 2) # mu, std
                 self.trg_end_prj = nn.Linear(d_model, 2) # mu, std
-            elif prob_model in ["l1", "l2"]:
+            elif prob_model in ["l1", "l2", "diou", "gaussian-mu"]:
                 self.trg_start_t_prj = nn.Linear(d_model, 1)
                 self.trg_end_prj = nn.Linear(d_model, 1)
 

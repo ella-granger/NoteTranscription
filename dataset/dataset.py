@@ -11,12 +11,12 @@ from dataset.constants import *
 
 class MelDataset(torch.utils.data.Dataset):
     def __init__(self, mel_dir, note_dir, id_json, train_mode,
-                 shuffle=True, device="cpu"):
+                 seg_len=320, shuffle=True, device="cpu"):
         super().__init__()
 
         self.voice_list = ["S", "A", "T", "B"]
         self.train_mode = train_mode
-        self.seg_len = SEG_LEN
+        self.seg_len = seg_len
         self.shuffle = shuffle
         self.device = device
 
