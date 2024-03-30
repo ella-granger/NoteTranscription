@@ -169,6 +169,9 @@ class NoteTransformer(nn.Module):
             else:
                 mel, *_ = self.encoder(mel)
 
+        if return_cnn:
+            self.enc_result = torch.permute(mel, (0, 2, 1))
+
         # decoding
         trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
 
