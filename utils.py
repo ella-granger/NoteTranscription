@@ -26,6 +26,9 @@ def plot_spec(spec):
 
 
 def plot_midi(pitch, start, end, inc=False):
+    # print(pitch)
+    # print(start)
+    # print(end)
     # print(start, end)
     # _ = input()
     if type(pitch) != list:
@@ -107,7 +110,7 @@ def get_list_t(pitch, start, end, mode="gaussian"):
 
     if len(pitch.shape) > 1:
         pitch = np.argmax(pitch, axis=1, keepdims=False)
-        if mode in ["gaussian", "l2", "l1", "diou", "gaussian-mu"]:
+        if mode in ["gaussian", "l2", "l1", "diou", "gaussian-mu", "l1-diou"]:
             start = start[:, 0].reshape(-1)
             end = end[:, 0].reshape(-1)
         elif mode == "beta":

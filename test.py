@@ -92,6 +92,7 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
         if p not in trg_dict:
             trg_dict[p] = []
         trg_dict[p].append((s, s+e))
+        # trg_dict[p].append((s, e))
 
     for p, s, e in zip(pitch_p, start_t_p, end_p):
         if p == 0:
@@ -99,6 +100,7 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
         if p not in prd_dict:
             prd_dict[p] = []
         prd_dict[p].append((s, s+e))
+        # prd_dict[p].append((s, e))
 
     print(trg_dict)
     print(prd_dict)
@@ -224,6 +226,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                            data_path / "note",
                            data_path / "full.json",
                            train_mode,
+                           seg_len=seg_len,
                            device=device)
     print(len(test_data))
 
@@ -232,6 +235,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                             d_inner=512,
                             n_layers=n_layers,
                             train_mode=train_mode,
+                            seg_len=seg_len,
                             enable_encoder=enable_encoder,
                             prob_model=prob_model).to(device)
     ckpt_path = logdir / "ckpt" / ckpt_id
@@ -287,6 +291,9 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             else:
                 pitch_p, start_t_p, end_p, start_p, dur_p = result
 
+            length = pitch_p.size(1)
+            # if length > 200:
+            #     exit()
             # print("ori:")
             # print(pitch)
             # print(start_t)
@@ -294,11 +301,12 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # print("pred:")
             # print(pitch)
             # print(start_t)
-            # print(pitch_p)
+            print(pitch_p)
             # print(start_p)
             # print(dur_p)
-            # print(start_t_p)
-            # print(end_p)
+            print(start_t_p)
+            print(end_p)
+            end_p = torch.clamp(end_p, 1e-4, 1.0)
             # print("------")
             # _ = input()
 
@@ -331,8 +339,13 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
             # else:
             #     break
+            # break
 
-    print("Frame(prec/recall):", f_c[1] / f_c[0], f_c[1] / f_c[2])
+    print(f_c)
+    frame_p = f_c[1] / f_c[0]
+    frame_r = f_c[1] / f_c[2]
+    frame_f = 2 * frame_p * frame_r / (frame_p + frame_r)
+    print("Frame(prec/recall/f1):", frame_p, frame_r, frame_f)
     # print("Onset(prec/recall):", on_c[1] / on_c[0], on_c[1] / on_c[2])
     # print("Offset(prec/recall):", off_c[1] / off_c[0], off_c[1] / off_c[2])
 

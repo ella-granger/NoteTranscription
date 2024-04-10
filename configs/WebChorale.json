@@ -1,20 +1,21 @@
 {
-    "logdir": "runs/a2s_layer2_ST_sine_enc_2cnn_small_gaussian_nll",
+    "logdir": "abl/layer2_T_l1_seg320_remove_dup_trans_time_enc_no_dec_pos_mlp_time_mlp_note",
 
     "n_layers": 2,
+    "prob_model": "l1",
+    "seg_len": 320,
 
-    "batch_size": 4,
+    "batch_size": 8,
 
-    "learning_rate": 0.0001,
+    "learning_rate": 1e-4,
     "warmup_steps": 12000,
     "clip_gradient_norm": false,
-    "epochs": 500,
-    "loss_norm": 1,
-    "time_loss_alpha": 0.1,
+    "epochs": 1000,
+    "time_loss_alpha": 1,
     "enable_encoder": true,
     "scheduled_sampling": false,
 
-    "train_mode": "ST",
+    "train_mode": "T",
 
     "data_path": "/storageNVME/huiran/NoteTranscription/WebChorale"
 }

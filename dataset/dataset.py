@@ -5,6 +5,7 @@ import pickle
 import torch
 import torch.nn.functional as F
 import json
+from copy import deepcopy
 from dataset.constants import *
 # from constants import *
 
@@ -24,6 +25,11 @@ class MelDataset(torch.utils.data.Dataset):
         note_dir = Path(note_dir)
         with open(id_json) as fin:
             id_list = json.load(fin)
+        # id_list = ["oudkfwwrZq0"]
+        # id_list = ["qjtMJxtoooI"]
+        # id_list = ["BC059"]
+        # id_list = ["sRmOnHiXU0o"]
+        # id_list = ["rcNyTVnpVe4"]
         
         mel_files = list(mel_dir.glob("*.pkl"))
 
@@ -72,6 +78,11 @@ class MelDataset(torch.utils.data.Dataset):
             end_idx = begin_idx + self.seg_len
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
+
+            # begin_time = 68.000
+            # end_time = 73.120
+            # begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
+            # end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
 
             cur_bar_list = []
             start_flag = False
@@ -129,12 +140,17 @@ class MelDataset(torch.utils.data.Dataset):
                     last_count = 0
                     for idx, note in enumerate(part_list):
                         if note[3] < end_time and note[4] >= begin_time:
-                            note_list.append(note)
+                            new_note = deepcopy(note)
+                            new_note[3] = max(note[3], begin_time)
+                            new_note[4] = min(note[4], end_time)
+                            note_list.append(tuple(new_note))
                             if note in last_list:
                                 full = True
 
                 # print(note_list)
+                note_list = list(set(note_list))
                 note_list = sorted(note_list, key=lambda x:(x[3], -x[0]))
+
                 for note in note_list:
                     token.append(note[0])
                     if "S" in self.train_mode:
