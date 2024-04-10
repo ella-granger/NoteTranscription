@@ -105,10 +105,10 @@ def masked_l1_loss(pred, gt, mask):
 
 def get_mix_t(step, k, epsilon):
     # return 1
-    if step < 160000:
+    if step < 100000:
         t = 1
     else:
-        t = max(epsilon, 1 - k * (step - 160000))
+        t = max(epsilon, 1 - k * (step - 100000))
     return t
 
 
@@ -122,8 +122,9 @@ def config():
     val_interval = 1000
     checkpoint_interval = 5000
     warmup_steps = 8000
+    seg_len = 320
     train_mode = "TS"
-    mix_k = 0.000003
+    mix_k = 0.000001
     epsilon = 0.1
     loss_norm = 1
     enable_encoder = True
@@ -288,19 +289,22 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 elif prob_model == "l1":
                     start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
-                    start_diff_p = start_t_p[:, 1:, :] - start_t_p[:, :-1, :]
-                    start_diff_o = start_t_o[:, 1:] - start_t_o[:, :-1]
-                    start_diff_loss = time_loss_alpha * masked_l2_loss(start_diff_p, start_diff_o, seq_mask[:, 1:])
+                    # start_diff_p = start_t_p[:, 1:, :] - start_t_p[:, :-1, :]
+                    # start_diff_o = start_t_o[:, 1:] - start_t_o[:, :-1]
+                    # start_diff_loss = time_loss_alpha * masked_l2_loss(start_diff_p, start_diff_o, seq_mask[:, 1:])
                 elif prob_model == "l2":
                     start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
                 elif prob_model == "diou":
                     start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
                     end_loss = 0
+                elif prob_model == "l1-diou":
+                    start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                    end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
             loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
-            if prob_model == "l1":
-                loss += start_diff_loss
+            # if prob_model == "l1":
+            #     loss += start_diff_loss
             loss.backward()
             optimizer.step_and_update_lr()
 
@@ -319,8 +323,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     else:
                         sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
                         sw.add_scalar("training/end_loss", end_loss.item(), step)
-                        if prob_model == "l1":
-                            sw.add_scalar("training/start_diff_loss", start_diff_loss.item(), step)
+                        # if prob_model == "l1":
+                        #     sw.add_scalar("training/start_diff_loss", start_diff_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
                 # sw.add_scalar("training/mix_t", t, step)
 
@@ -405,6 +409,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             elif prob_model == "diou":
                                 start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
                                 end_loss = torch.zeros(1).to(device)
+                            elif prob_model == "l1-diou":
+                                start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                                end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
                         loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
 
