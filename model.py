@@ -148,7 +148,7 @@ class NoteTransformer(nn.Module):
             if prob_model in ["gaussian", "beta"]:
                 self.trg_start_t_prj = nn.Linear(d_model, 2) # mu, std
                 self.trg_end_prj = nn.Linear(d_model, 2) # mu, std
-            elif prob_model in ["l1", "l2", "diou", "gaussian-mu"]:
+            elif prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
                 self.trg_start_t_prj = nn.Linear(d_model, 1)
                 self.trg_end_prj = nn.Linear(d_model, 1)
 
@@ -333,16 +333,17 @@ class NoteTransformer(nn.Module):
             return pitch_out, start_t_out, end_out, start_s_out, dur_out           
 
 
-    def predict(self, mel, beam_size=2):
+    def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, beam_size=2):
         device = mel.device
         mel = self.cnn(mel)
         mel = torch.permute(mel, (0, 2, 1))
 
         enc, *_ = self.encoder(mel)
         enc = enc.repeat((beam_size, 1, 1))
-        print(enc.size())
+        # print(enc.size())
 
         MAX_LEN = 800
+        p_start = 0
         pitch = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
         start_t = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
         end = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
@@ -350,10 +351,17 @@ class NoteTransformer(nn.Module):
         dur = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
         mask = torch.zeros((beam_size, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
+        if prev_pitch is not None:
+            for b in range(beam_size):
+                pitch[b, 1:len(prev_pitch)+1] = prev_pitch
+                start_t[b, 1:len(prev_pitch)+1, 0] = prev_start
+                end[b, 1:len(prev_pitch)+1, 0] = prev_dur
+                mask[b, :, :len(prev_pitch)+1] = True
+            p_start = len(prev_pitch)
 
         scores = torch.zeros((beam_size, 1), dtype=torch.float64).to(device)
         len_map = torch.arange(1, MAX_LEN + 1, dtype=torch.long).unsqueeze(0).to(device)
-        for i in tqdm(range(MAX_LEN-1)):
+        for i in tqdm(range(p_start, MAX_LEN-1)):
             mask[:, :, i] = True
             # print(mask)
             # print(pitch)
@@ -397,20 +405,24 @@ class NoteTransformer(nn.Module):
             # _ = input()
             if i == 0:
                 best_k2_probs, best_k2_idx = pitch_p[0:1, i, :].topk(beam_size)
-                print(best_k2_probs)
-                print(best_k2_idx)
+                # print(best_k2_probs)
+                # print(best_k2_idx)
             else:
                 best_k2_probs, best_k2_idx = pitch_p[:, i, :].topk(beam_size)
-            # print(best_k2_probs)
+            # print(torch.log(best_k2_probs))
             # print(best_k2_idx)
+            # print(start_t_out[:, :i+1, 0])
+            # print(end_out[:, :i+1, 0])
             scores = torch.log(best_k2_probs).view(beam_size, -1) + scores.view(beam_size, 1)
-            if i == 0:
-                print(scores)
+            # if i == 0:
+            # print(scores)
 
             scores, best_k_idx_in_k2 = scores.view(-1).topk(beam_size)
+            # print(scores)
 
             best_k_r_idxs, best_k_c_idxs = best_k_idx_in_k2 // beam_size, best_k_idx_in_k2 % beam_size
             best_k_idx = best_k2_idx[best_k_r_idxs, best_k_c_idxs]
+            # print("best r:", best_k_r_idxs)
 
             pitch[:, :i+1] = pitch[best_k_r_idxs, :i+1]
             pitch[:, i+1] = best_k_idx
@@ -448,16 +460,18 @@ class NoteTransformer(nn.Module):
                 dur[:, i+1] = dur_pred[:]
             if "T" in self.train_mode:
                 start_t[:, :i+1] = start_t[best_k_r_idxs, :i+1]
-                start_t[:, i+1, 0] = start_t_out[:, i, 0]
+                start_t[:, i+1, 0] = start_t_out[best_k_r_idxs, i, 0]
                 end[:, :i+1] = end[best_k_r_idxs, :i+1]
-                end[:, i+1, 0] = end_out[:, i, 0]
-            # print(pitch[:, :i+1])
+                end[:, i+1, 0] = end_out[best_k_r_idxs, i, 0]
+            # print(pitch[:, :i+2])
+            # print(start_t[:, :i+2, 0])
+            # print(end[:, :i+2, 0])
             # _ = input()
 
-        print(pitch)
-        print(ans_idx)
+        # print(pitch)
+        # print(ans_idx)
         ans_len = seq_lens[ans_idx]
-        print(ans_len)
+        # print(ans_len)
         # _ = input()
         pitch = pitch[ans_idx:ans_idx+1, 1:ans_len-1]
         if "S" in self.train_mode:

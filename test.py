@@ -217,7 +217,8 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     logdir = Path(logdir)
     print_config(ex.current_run)
 
-    data_path = "./dataset/test/BachChorale"
+    # data_path = "./dataset/test/BachChorale"
+    data_path = "./dataset/test/WebChorale"
 
     data_path = Path(data_path)
     test_data = MelDataset(data_path / "mel",
@@ -278,6 +279,13 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             print(fid, begin_time, end_time)
             # _ = input()
 
+            tf = model(mel, x["pitch"].to(device)[:, :-1], None, None,
+                       x["start_t"].to(device)[:, :-1], x["end"].to(device)[:, :-1])
+            tf_p, tf_start, tf_end = tf
+            tf_p = torch.argmax(tf_p, dim=-1)
+            print(tf_p)
+            print(tf_start.reshape(1, -1))
+            print(tf_end.reshape(1, -1))
             result = model.predict(mel, beam_size=4)
 
             if train_mode == "S":
@@ -331,6 +339,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
             # else:
             #     break
+            break
 
     print("Frame(prec/recall):", f_c[1] / f_c[0], f_c[1] / f_c[2])
     # print("Onset(prec/recall):", on_c[1] / on_c[0], on_c[1] / on_c[2])
