@@ -22,8 +22,9 @@ class MelDataset(torch.utils.data.Dataset):
 
         mel_dir = Path(mel_dir)
         note_dir = Path(note_dir)
-        with open(id_json) as fin:
-            id_list = json.load(fin)
+        # with open(id_json) as fin:
+        #     id_list = json.load(fin)
+        id_list = ["qjtMJxtoooI"]
         
         mel_files = list(mel_dir.glob("*.pkl"))
 
@@ -72,6 +73,11 @@ class MelDataset(torch.utils.data.Dataset):
             end_idx = begin_idx + self.seg_len
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
+
+            begin_time = 78.992
+            end_time = 84.112
+            begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
+            end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
 
             cur_bar_list = []
             start_flag = False
