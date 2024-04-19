@@ -180,10 +180,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     
     optimizer = ScheduledOptim(
         optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
-        2.0, 256, warmup_steps)
+        2.0, 256, warmup_steps) # weight decay: 0.01, without embedding
 
     step = 0
     max_pitch_prec = 0
+    min_pitch_loss = np.inf
     
     ckpt_path = logdir / "ckpt" / "cur"
     if ckpt_path.exists():
@@ -299,7 +300,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
                     end_loss = 0
                 elif prob_model == "l1-diou":
-                    start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                    start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + 0.5 * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
                     end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
             loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
@@ -410,7 +411,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
                                 end_loss = torch.zeros(1).to(device)
                             elif prob_model == "l1-diou":
-                                start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                                start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + 0.5 * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
                         loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
@@ -522,8 +523,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                        "max_pitch_prec": max_pitch_prec}
                 torch.save(obj, str(save_path))
 
-                if total_T / total_C > max_pitch_prec:
-                    max_pitch_prec = total_T / total_C
+                # if total_T / total_C > max_pitch_prec:
+                if eval_pitch_loss < min_pitch_loss:
+                    # max_pitch_prec = total_T / total_C
+                    min_pitch_loss = eval_pitch_loss
                     save_path = checkpoint_path / "best"
                     torch.save(obj, str(save_path))
 

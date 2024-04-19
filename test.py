@@ -55,13 +55,13 @@ def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len):
     i_ref = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t, end)]).reshape(-1, 2)
 
     metrics = dict()
-    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None)
+    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None, onset_tolerance=0.1)
     metrics['metric/note/precision'] = p
     metrics['metric/note/recall'] = r
     metrics['metric/note/f1'] = f
     metrics['metric/note/overlap'] = o
 
-    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est)
+    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, onset_tolerance=0.1)
     metrics['metric/note-with-offsets/precision'] = p
     metrics['metric/note-with-offsets/recall'] = r
     metrics['metric/note-with-offsets/f1'] = f
@@ -219,8 +219,9 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     logdir = Path(logdir)
     print_config(ex.current_run)
 
-    # data_path = "./dataset/test/BachChorale"
-    data_path = "./dataset/test/WebChorale"
+    data_path = "./dataset/test/BachChorale"
+    # data_path = "./dataset/test/WebChorale"
+    # data_path = "/storageNVME/huiran/NoteTranscription/BachChorale"
 
     data_path = Path(data_path)
     test_data = MelDataset(data_path / "mel",
