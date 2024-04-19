@@ -1,8 +1,8 @@
 {
-    "logdir": "abl/layer2_T_l1_seg320_remove_dup_trans_time_enc_no_dec_pos_mlp_time_mlp_note",
+    "logdir": "final/l1diou_seg320",
 
     "n_layers": 2,
-    "prob_model": "l1",
+    "prob_model": "l1-diou",
     "seg_len": 320,
 
     "batch_size": 8,
