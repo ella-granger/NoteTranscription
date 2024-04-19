@@ -29,13 +29,13 @@ ex = Experiment("full_transcription")
 @ex.config
 def cfg():
     # ckpt_id = "00120000"
-    ckpt_id = "best"
-    # ckpt_id = "cur"
+    # ckpt_id = "best"
+    ckpt_id = "cur"
     mix_k = 0
     epsilon = 0
     seg_len = SEG_LEN
-    # input_audio = "/media/ella/Yu/UR/datasets/BachChorale/audio/BC001.WAV"
-    input_audio = "/media/ella/Yu/UR/datasets/BachChorale/audio/BC059.WAV"
+    input_audio = "/media/ella/Yu/UR/datasets/BachChorale/audio/BC001.WAV"
+    # input_audio = "/media/ella/Yu/UR/datasets/BachChorale/audio/BC059.WAV"
 
     
 @ex.automain
@@ -76,14 +76,14 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                                                          norm="slaney")
     mel_spec = trans_mel(wave_mono)
     mel_spec = torch.log(torch.clamp(mel_spec, min=MEL_EPSILON)) # (N_MELS, L)
-    mel_spec = mel_spec[:, 1324:(1324+seg_len)]
+    # mel_spec = mel_spec[:, 1324:(1324+seg_len)]
     fig = plot_spec(mel_spec.numpy())
     fig.savefig("full_song.png")
     mel_spec = mel_spec.unsqueeze(0).double().to(device)
 
     with torch.no_grad():
         # transcribe seg by seg, use previous tail
-        mel_hop = seg_len // 2
+        mel_hop = seg_len * 3 // 4
         begin_idx = 0
         end_idx = 0
         pref_s = 0
@@ -113,7 +113,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     pref_s += 1
                 pref_e = pref_s + 1
                 if pref_e < len(start):
-                    while start[pref_e] + dur[pref_e] < begin_time + 0.45:
+                    while start[pref_e] + dur[pref_e] < begin_time + 0.2:
                         pref_e += 1
                         if pref_e == len(start):
                             break
