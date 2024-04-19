@@ -93,14 +93,14 @@ class Decoder(nn.Module):
 
     def __init__(
             self, d_word_vec, n_layers, n_head, d_model, d_inner,
-            n_position=200, dropout=0.1, scale_emb=False):
+            n_position=800, dropout=0.1, scale_emb=False):
 
         super().__init__()
 
         d_k = d_model // n_head
         d_v = d_model // n_head
 
-        # self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)

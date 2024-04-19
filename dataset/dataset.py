@@ -5,23 +5,31 @@ import pickle
 import torch
 import torch.nn.functional as F
 import json
+from copy import deepcopy
 from dataset.constants import *
+# from constants import *
 
 
 class MelDataset(torch.utils.data.Dataset):
-    def __init__(self, mel_dir, note_dir, id_json,
-                 shuffle=True, score_info=False, device="cpu"):
+    def __init__(self, mel_dir, note_dir, id_json, train_mode,
+                 seg_len=320, shuffle=True, device="cpu"):
         super().__init__()
 
-        self.seg_len = SEG_LEN
+        self.voice_list = ["S", "A", "T", "B"]
+        self.train_mode = train_mode
+        self.seg_len = seg_len
         self.shuffle = shuffle
-        self.score_info = score_info
         self.device = device
 
         mel_dir = Path(mel_dir)
         note_dir = Path(note_dir)
         with open(id_json) as fin:
             id_list = json.load(fin)
+        # id_list = ["oudkfwwrZq0"]
+        # id_list = ["qjtMJxtoooI"]
+        # id_list = ["BC059"]
+        # id_list = ["sRmOnHiXU0o"]
+        # id_list = ["rcNyTVnpVe4"]
         
         mel_files = list(mel_dir.glob("*.pkl"))
 
@@ -29,9 +37,11 @@ class MelDataset(torch.utils.data.Dataset):
         self.note_list = []
         self.dataset_len = 0
 
+        self.fid_list = []
         for f in mel_files:
             if f.stem not in id_list:
                 continue
+            self.fid_list.append(f.stem)
             with open(f, 'rb') as fin:
                 mel = pickle.load(fin)
             with open(note_dir / ("%s.pkl" % f.stem), "rb") as fin:
@@ -54,6 +64,9 @@ class MelDataset(torch.utils.data.Dataset):
 
         mel = self.mel_list[index]
         notes = self.note_list[index]
+        fid = self.fid_list[index]
+
+        # print(mel.size())
 
         total_length = self.get_length(mel, notes)
 
@@ -66,82 +79,220 @@ class MelDataset(torch.utils.data.Dataset):
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
 
-            cur_note_list = []
-            for _, track_note_list in notes.items():
-                for n in track_note_list:
-                    if n[3] < end_time and n[4] >= begin_time:
-                        cur_note_list.append(n)
-            cur_note_list = sorted(cur_note_list, key=lambda x: (x[3], -x[0]))
-            pitch = [x[0] for x in cur_note_list]
-            start = [x[3] for x in cur_note_list]
-            end = [x[4] for x in cur_note_list]
-            pitch.insert(0, MAX_MIDI+1)
-            start.insert(0, begin_time)
-            end.insert(0, begin_time)
-            pitch.append(MAX_MIDI+2)
-            start.append(max(end))
-            end.append(max(end))
+            # begin_time = 68.000
+            # end_time = 73.120
+            # begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
+            # end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
+
+            cur_bar_list = []
+            start_flag = False
+            for bar in notes:
+                note_count = sum([len(v) for k, v in bar.items() if k[0] in self.voice_list])
+                time_min = 1e6
+                time_max = -1
+                # print(note_count, bar)
+                if note_count > 0 or start_flag:
+                    if note_count == 0:
+                        cur_bar_list.append(bar)
+                        continue
+                    for k, v in bar.items():
+                        if k[0] not in self.voice_list:
+                            continue
+                        for note in v:
+                            if note[-1] > time_max:
+                                time_max = note[-1]
+                            if note[-2] < time_min:
+                                time_min = note[-2]
+                    if time_min < end_time and time_max > begin_time:
+                        cur_bar_list.append(bar)
+                        start_flag = True
+                    if time_min > end_time:
+                        break
+            # print(begin_time, end_time)
+            # print(cur_bar_list)
+            token = []
+            if "S" in self.train_mode:
+                start = []
+                dur = []
+            if "T" in self.train_mode:
+                start_t = []
+                end = []
+
+            for bar in cur_bar_list:
+                full = False
+                sig = bar["measure"]
+                max_time = 0
+                note_list = []
+                for part in self.voice_list:
+                    part_list = []
+                    last_list = []
+                    for k, v in bar.items():
+                        if part in k:
+                            part_list += v
+                            if len(v) > 0:
+                                last_list.append(v[-1])
+                    part_list = sorted(part_list, key=lambda x: (x[3], -x[0]))
+                    # print("--------------------------------")
+                    # print(part)
+                    # print(part_list)
+                    # print(last_list)
+
+                    last_count = 0
+                    for idx, note in enumerate(part_list):
+                        if note[3] < end_time and note[4] >= begin_time:
+                            new_note = deepcopy(note)
+                            new_note[3] = max(note[3], begin_time)
+                            new_note[4] = min(note[4], end_time)
+                            note_list.append(tuple(new_note))
+                            if note in last_list:
+                                full = True
+
+                # print(note_list)
+                note_list = list(set(note_list))
+                note_list = sorted(note_list, key=lambda x:(x[3], -x[0]))
+
+                for note in note_list:
+                    token.append(note[0])
+                    if "S" in self.train_mode:
+                        start.append(note[1])
+                        dur.append(note[2])
+                    if "T" in self.train_mode:
+                        start_t.append(note[3])
+                        end.append(note[4])
+                        if note[4] > max_time:
+                            max_time = note[4]
+                if full:
+                    if "S" in self.train_mode:
+                        token.append(0)
+                        start.append(sig)
+                        dur.append(0.0)
+                        if "T" in self.train_mode:
+                            start_t.append(max_time)
+                            end.append(max_time)
+            # print(token)
+            # print(start)
+            # print(dur)
             
-            pitch = torch.LongTensor(pitch)
-            start = torch.FloatTensor(start)
-            end = torch.FloatTensor(end)
-
-            pitch[pitch>0] = pitch[pitch>0] - MIN_MIDI + 1
-            start = (start - begin_time) / (end_time - begin_time)
-            end = (end - begin_time) / (end_time - begin_time)
-
-            start = torch.clip(start, 0.0, 1.0)
-            end = torch.clip(end, 0.0, 1.0)
-
             mel = mel[:, begin_idx:end_idx]
-        
-        if self.score_info:
+            token.insert(0, MAX_MIDI+1)
+            token.append(MAX_MIDI+2)
+            token = torch.LongTensor(token)
+            token[token>0] = token[token>0] - MIN_MIDI + 1
+
+            if "S" in self.train_mode:
+                start.insert(0, 0.0)
+                dur.insert(0, 0.0)
+                start.append(0.0)
+                dur.append(0.0)
+
+                start = np.array(start) / 0.25
+                dur = np.array(dur) / 0.25
+
+                start = start.astype(int)
+                dur = dur.astype(int)
+                
+                start = torch.LongTensor(start)
+                dur = torch.LongTensor(dur)
+                dur = torch.clip(dur, 0, MAX_DUR)
+                
+            if "T" in self.train_mode:
+                start_t.insert(0, begin_time)
+                if len(end) == 0:
+                    start_t.append(end_time)
+                else:
+                    start_t.append(max(end))
+                end.insert(0, begin_time)
+                if len(end) == 1:
+                    end.append(end_time)
+                else:
+                    end.append(max(end))
+                start_t = torch.FloatTensor(start_t)
+                end = torch.FloatTensor(end)
+
+                start_t = (start_t - begin_time) / (end_time - begin_time)
+                end = (end - begin_time) / (end_time - begin_time)
+
+                start_t = torch.clip(start_t, 0.0, 1.0)
+                end = torch.clip(end, 0.0, 1.0)
+
+                # increment
+                end = end - start_t
+                # start_t[1:] = start_t[1:] - start_t[:-1]
+
+        if self.train_mode == "S":
             data_point = dict(mel=mel,
-                              pitch=pitch,
-                              beat_start=beat_start,
-                              dur=dur,
+                              pitch=token,
                               start=start,
-                              end=end)
+                              dur=dur,
+                              begin_time=begin_time,
+                              end_time=end_time,
+                              fid=fid)
+        elif self.train_mode == "T":
+            data_point = dict(mel=mel,
+                              pitch=token,
+                              start_t=start_t,
+                              end=end,
+                              begin_time=begin_time,
+                              end_time=end_time,
+                              fid=fid)
         else:
             data_point = dict(mel=mel,
-                              pitch=pitch,
+                              pitch=token,
                               start=start,
-                              end=end)
+                              dur=dur,
+                              start_t=start_t,
+                              end=end,
+                              begin_time=begin_time,
+                              end_time=end_time,
+                              fid=fid)
         return data_point
 
 
     def collate_fn(self, batch):
 
+        pad_dict = {"pitch": PAD_IDX,
+                    "start": MAX_START+1,
+                    "dur": 0,
+                    "start_t": 0.0,
+                    "end": 0.0}
+
         def pad_and_stack(x_list, pad):
             max_len = max([len(x) for x in x_list])
             x_list = [F.pad(x, (0, max_len - len(x)), value=pad) for x in x_list]
             return torch.stack(x_list)
-        
-        mel = [x["mel"] for x in batch]
-        pitch = [x["pitch"] for x in batch]
-        start = [x["start"] for x in batch]
-        end = [x["end"] for x in batch]
 
-        mel = torch.stack(mel)
+        result = {}
 
-        pitch = pad_and_stack(pitch, PAD_IDX)
-        start = pad_and_stack(start, 0.0)
-        end = pad_and_stack(end, 0.0)
+        for key in batch[0]:
+            v = [x[key] for x in batch]
+            if key in pad_dict:
+                v = pad_and_stack(v, pad_dict[key])
+            result[key] = v
+        result["mel"] = torch.stack(result["mel"])
 
-        return dict(mel=mel,
-                    pitch=pitch,
-                    start=start,
-                    end=end)
+        return result
             
 
     def get_length(self, mel, note):
         mel_length = mel.size(1)
         note_length = 0
-        for name, note_list in note.items():
-            track_length = note_list[-1][-1]
-            if track_length > note_length:
-                note_length = track_length
+        for bar in note[::-1]:
+            note_count = sum([len(v) for k, v in bar.items() if k[0] in self.voice_list])
+            # print(bar)
+            # print(note_count)
+            if note_count > 0:
+                for k, v in bar.items():
+                    if k[0] not in self.voice_list:
+                        continue
+                    for note in v:
+                        if note[-1] > note_length:
+                            note_length = note[-1]
+                break
+        # print(note_length)
         note_length = int(note_length * SAMPLE_RATE / HOP_LENGTH)
+        # print(mel_length)
+        # print(note_length)
+        # _ = input()
 
         return min(mel_length, note_length)
 
@@ -152,10 +303,10 @@ if __name__ == "__main__":
     note_dir = Path("./test/BachChorale/note")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    dataset = MelDataset(mel_dir, note_dir, "./test/BachChorale/test.json", device=device)
+    dataset = MelDataset(mel_dir, note_dir, "./test/BachChorale/test.json", "S", device=device)
 
     from torch.utils.data import DataLoader
-    batch_size = 2
+    batch_size = 1
     test_loader = DataLoader(dataset,
                              batch_size,
                              shuffle=False,
@@ -163,10 +314,13 @@ if __name__ == "__main__":
                              num_workers=1,
                              collate_fn=dataset.collate_fn)
 
+    print(len(dataset))
     for x in test_loader:
         print(x)
         for k, v in x.items():
             print(k, v.size())
+            if k == "pitch":
+                print(v)
         _ = input()
 
     

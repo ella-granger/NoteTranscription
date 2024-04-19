@@ -1,16 +1,18 @@
 {
-    "logdir": "runs/good_time_loss_layers_2_warmup_8000",
+    "logdir": "runs/a2s_bach_layer2_ST_new_seq_scheduled_sampling_alpha10",
 
     "n_layers": 2,
 
-    "batch_size": 2,
+    "batch_size": 4,
 
     "learning_rate": 0.0001,
     "warmup_steps": 8000,
     "clip_gradient_norm": false,
-    "epochs": 1000,
+    "epochs": 500,
     "loss_norm": 1,
     "time_loss_alpha": 20,
 
-    "data_path": "dataset/test/BachChorale"
+    "train_mode": "ST",
+
+    "data_path": "/storageSSD/huiran/NoteTranscription/BachChorale"
 }
