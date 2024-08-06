@@ -36,11 +36,12 @@ def merge_notes(note_list):
                 result[-1][-1] = prev_end
             result.append(list(deepcopy(n)))
         prev_end = max(prev_end, n[1])
-    result[-1][-1] = prev_end
+    if len(result) > 0:
+        result[-1][-1] = prev_end
     return result
 
 
-def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len):
+def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len, tolerance=0.05):
     pitch = pitch.detach().cpu().numpy()[0]
     start_t = start_t.detach().cpu().numpy()[0]
     end = end.detach().cpu().numpy()[0]
@@ -55,13 +56,13 @@ def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len):
     i_ref = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t, end)]).reshape(-1, 2)
 
     metrics = dict()
-    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None, onset_tolerance=0.1)
+    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None, onset_tolerance=tolerance)
     metrics['metric/note/precision'] = p
     metrics['metric/note/recall'] = r
     metrics['metric/note/f1'] = f
     metrics['metric/note/overlap'] = o
 
-    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, onset_tolerance=0.1)
+    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, onset_tolerance=tolerance)
     metrics['metric/note-with-offsets/precision'] = p
     metrics['metric/note-with-offsets/recall'] = r
     metrics['metric/note-with-offsets/f1'] = f
@@ -91,7 +92,8 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
             continue
         if p not in trg_dict:
             trg_dict[p] = []
-        trg_dict[p].append((s, s+e))
+        if e > 0:
+            trg_dict[p].append((s, s+e))
         # trg_dict[p].append((s, e))
 
     for p, s, e in zip(pitch_p, start_t_p, end_p):
@@ -99,7 +101,8 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
             continue
         if p not in prd_dict:
             prd_dict[p] = []
-        prd_dict[p].append((s, s+e))
+        if e > 0:
+            prd_dict[p].append((s, s+e))
         # prd_dict[p].append((s, e))
 
     print(trg_dict)
@@ -150,6 +153,8 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
 
         i = 0
         for n in pred_notes:
+            if i == len(trg_notes):
+                break
             while trg_notes[i][1] < n[0]:
                 i += 1
                 if i == len(trg_notes):
@@ -219,14 +224,14 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     logdir = Path(logdir)
     print_config(ex.current_run)
 
-    data_path = "./dataset/test/BachChorale"
-    # data_path = "./dataset/test/WebChorale"
+    # data_path = "./dataset/test/BachChorale"
+    data_path = "./dataset/YouChorale"
     # data_path = "/storageNVME/huiran/NoteTranscription/BachChorale"
 
     data_path = Path(data_path)
     test_data = MelDataset(data_path / "mel",
                            data_path / "note",
-                           data_path / "full.json",
+                           data_path / "large ensemble.json",
                            train_mode,
                            seg_len=seg_len,
                            device=device)
@@ -320,10 +325,10 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # _ = input()
 
             frame, _, _ = cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p)
-            metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
-            print(metrics)
-            for k, v in metrics.items():
-                mets[k].append(v)
+            # metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
+            # print(metrics)
+            # for k, v in metrics.items():
+            #     mets[k].append(v)
             
             f_c += frame
             # on_c += onset
@@ -358,6 +363,6 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     # print("Onset(prec/recall):", on_c[1] / on_c[0], on_c[1] / on_c[2])
     # print("Offset(prec/recall):", off_c[1] / off_c[0], off_c[1] / off_c[2])
 
-    for k, v in mets.items():
-        print(k, np.mean(v), np.std(v))
+    # for k, v in mets.items():
+    #     print(k, np.mean(v), np.std(v))
     

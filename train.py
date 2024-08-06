@@ -87,7 +87,25 @@ def masked_diou_loss(start_t_p, dur_p, start_t_g, dur_g, mask):
         inter[inter < 0] = 0
         d = torch.abs((l_p + r_p) / 2 - (l_g + r_g) / 2)
 
-        batch_sum += torch.sum(1 - inter / c + (d/c) ** 2) 
+        b_diou = torch.sum(1 - inter / c + (d/c) ** 2)
+        if torch.isnan(b_diou).any():
+            print(i)
+            print(mask[i])
+            print(l_p)
+            print(r_p)
+            print(l_g)
+            print(r_g)
+            print(c)
+            print(d)
+            print(inter)
+            print("--------------------ref----------------")
+
+            i_ref = (i + 1) % (start_t_p.size(0))
+            print(start_t_p[i_ref, :, 0][mask[i_ref]])
+            print(start_t_g[i_ref, :][mask[i_ref]])
+            raise RuntimeError("Found NaN!")
+
+        batch_sum += b_diou 
         
     return batch_sum
 
@@ -222,6 +240,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 start_t_i, start_t_o = patch_trg(start_t)
                 end_i, end_o = patch_trg(end)
 
+            # print(start_t_o[0])
+            # print(end_o[0])
+            # print(pitch_o[0])
+            # _ = input()
+
             if not scheduled_sampling:
                 optimizer.zero_grad()
             result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
@@ -270,12 +293,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             dur_loss = 0
             start_t_loss = 0
             end_loss = 0
+            diou_loss = 0
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             if "S" in train_mode:
                 start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                 dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
             if "T" in train_mode:
-                seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
+                seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
                 if prob_model == "beta":
                     # print("start")
                     start_t_loss = time_loss_alpha * masked_beta_nll(start_t_p, start_t_o, seq_mask)
@@ -297,15 +321,26 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
                 elif prob_model == "diou":
-                    start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
-                    end_loss = 0
+                    diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
                 elif prob_model == "l1-diou":
-                    start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + 0.5 * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                    start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask))
+                    try:
+                        diou_loss = 0.5 * time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask)
+                    except Exception as e:
+                        print(x["fid"])
+                        print(x["begin_time"])
+                        print(x["end_time"])
+                        for i in range(len(start_t_o)):
+                            print(start_t_o[i])
+                            print(pitch_o[i])
+                        # print(start_t_o.size())
+                        raise e
                     end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
-            loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
+            loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss + diou_loss
             # if prob_model == "l1":
             #     loss += start_diff_loss
+
             loss.backward()
             optimizer.step_and_update_lr()
 
@@ -319,9 +354,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("training/start_loss", start_loss.item(), step)
                     sw.add_scalar("training/dur_loss", dur_loss.item(), step)
                 if "T" in train_mode:
-                    if prob_model == "diou":
-                        sw.add_scalar("training/diou_loss", start_t_loss.item(), step)
-                    else:
+                    if "diou" in prob_model:
+                        sw.add_scalar("training/diou_loss", diou_loss.item(), step)
+                    if "f1" in prob_model:
                         sw.add_scalar("training/start_t_loss", start_t_loss.item(), step)
                         sw.add_scalar("training/end_loss", end_loss.item(), step)
                         # if prob_model == "l1":
@@ -338,6 +373,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_dur_loss = 0
                     total_start_t_loss = 0
                     total_end_loss = 0
+                    total_diou_loss = 0
                     total_T = 0
                     total_start_T = 0
                     total_dur_T = 0
@@ -385,12 +421,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         dur_loss = 0
                         start_t_loss = 0
                         end_loss = 0
+                        diou_loss = 0
                         pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                         if "S" in train_mode:
                             start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                             dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
                         if "T" in train_mode:
-                            seq_mask = (pitch_i != PAD_IDX) * (pitch_i != 0)
+                            seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
 
                             if prob_model == "beta":
                                 start_t_loss = time_loss_alpha * masked_beta_nll(start_t_p, start_t_o, seq_mask)
@@ -408,26 +445,25 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
                             elif prob_model == "diou":
-                                start_t_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
-                                end_loss = torch.zeros(1).to(device)
+                                diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
                             elif prob_model == "l1-diou":
-                                start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask) + 0.5 * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                                start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask))
+                                diou_loss = time_loss_alpha * 0.5 * (masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
-                        loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss
+                        loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss + diou_loss
 
                         if i < 1:
                             b = begin_time
                             e = end_time
-                            if data_path.stem == "WebChorale":
+                            if data_path.stem == "YouChorale":
                                 # WebChorale
-                                audio_path = Path("/storageNVME/huiran/WebChoraleDataset/OneSong")
+                                audio_path = Path("./dataset/YouChorale/audio_clean")
                             else:
                                 # BachChorale
                                 audio_path = Path("/storageNVME/huiran/BachChorale/BachChorale")
-                            audio_f = audio_path / ("%s.flac" % fid)
+                            audio_f = audio_path / ("%s.mp4" % fid)
                             wav, sr = torchaudio.load(audio_f)
-                            print(sr)
                             b = int(b * sr)
                             e = int(e * sr)
                             wav = wav.mean(dim=0)
@@ -486,8 +522,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             total_start_loss += start_loss.item()
                             total_dur_loss += dur_loss.item()
                         if "T" in train_mode:
-                            total_start_t_loss += start_t_loss.item()
-                            total_end_loss += end_loss.item()
+                            if "l1" in prob_model:
+                                total_start_t_loss += start_t_loss.item()
+                                total_end_loss += end_loss.item()
+                            if "diou" in prob_model:
+                                total_diou_loss += diou_loss.item()
                         total_count += 1
 
                 eval_loss = total_loss / total_count
@@ -500,11 +539,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("eval/start_loss", eval_start_loss, step)
                     sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
                 if "T" in train_mode:
-                    eval_start_t_loss = total_start_t_loss / total_count
-                    eval_end_loss = total_end_loss / total_count
-                    if prob_model == "diou":
-                        sw.add_scalar("eval/diou_loss", eval_start_t_loss, step)
-                    else:
+                    if "diou" in prob_model:
+                        eval_diou_loss = total_diou_loss / total_count
+                        sw.add_scalar("eval/diou_loss", eval_diou_loss, step)
+                    if "f1" in prob_model:
+                        eval_start_t_loss = total_start_t_loss / total_count
+                        eval_end_loss = total_end_loss / total_count
                         sw.add_scalar("eval/start_t_loss", eval_start_t_loss, step)
                         sw.add_scalar("eval/end_loss", eval_end_loss, step)
                 sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
