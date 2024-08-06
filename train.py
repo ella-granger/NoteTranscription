@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from torch.distributions.beta import Beta
 import torchaudio
+import torch_optimizer as optim
 import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
@@ -130,6 +131,32 @@ def get_mix_t(step, k, epsilon):
     return t
 
 
+def getOptimizerGroup(model, weight_decay):
+    param_optimizer = list(model.named_parameters())
+    # exclude GroupNorm and PositionEmbedding from weight decay
+
+    noDecay = []
+    for name, module in model.named_modules():
+        if isinstance(module, nn.GroupNorm) \
+                or isinstance(module, nn.LayerNorm) \
+                or isinstance(module, LearnableSpatialPositionEmbedding) \
+                or isinstance(module, nn.Embedding):
+            noDecay.extend(list(module.parameters()))
+        else:
+            noDecay.extend([p for n, p in module.named_parameters() if "bias" in n])
+    
+    otherParams = set(model.parameters()) - set(noDecay)
+    otherParams = [param for param in model.parameters() if param in otherParams]
+    noDecay = set(noDecay)
+    noDecay = [param for param in model.parameters() if param in noDecay]
+
+
+    optimizerConfig = [{"params": otherParams, "weight_decay":weight_decay},
+                        {"params": noDecay, "weight_decay":0e-7}]
+
+    return optimizerConfig
+
+
 @ex.config
 def config():
     # default settings, will be changed by configuration json
@@ -145,6 +172,7 @@ def config():
     mix_k = 0.000001
     epsilon = 0.1
     loss_norm = 1
+    time_lambda = 3
     enable_encoder = True
     scheduled_sampling = False
 
@@ -155,7 +183,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, train_mode, enable_encoder,
-          scheduled_sampling, prob_model, seg_len):
+          scheduled_sampling, prob_model, seg_len, time_lambda):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -195,10 +223,22 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     print(total_params)
     # exit()
     model = model.to(device)
+
+    optimizerGroup = getOptimizerGroup(model, 1e-2)
+    optimizer = optim.AdaBelief(
+        optimizerGroup,
+        1e-5,
+        weight_decouple=True,
+        eps=1e-8,
+        weight_decay=1e-2,
+        rectify=True
+    )
+
+    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 4e-4, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
     
-    optimizer = ScheduledOptim(
-        optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
-        2.0, 256, warmup_steps) # weight decay: 0.01, without embedding
+    # optimizer = ScheduledOptim(
+    #     optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
+    #     2.0, 256, warmup_steps) # weight decay: 0.01, without embedding
 
     step = 0
     max_pitch_prec = 0
@@ -210,8 +250,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         model.load_state_dict(ckpt_dict["model"])
         step = ckpt_dict["steps"]
         max_pitch_prec = ckpt_dict["max_pitch_prec"]
-        optimizer._optimizer.load_state_dict(ckpt_dict["optim"])
-        optimizer.n_steps = step
+        # optimizer._optimizer.load_state_dict(ckpt_dict["optim"])
+        # optimizer.n_steps = step
+        optimizer.load_state_dict(ckpt_dict["optim"])
+        lrScheduler.load_state_dict(ckpt_dict["scheduler"])
     
     model.train()
     torch.autograd.set_detect_anomaly(True)
@@ -337,12 +379,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         raise e
                     end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
-            loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss + diou_loss
+            loss = pitch_loss + time_lambda * (start_loss + dur_loss + start_t_loss + end_loss + diou_loss)
             # if prob_model == "l1":
             #     loss += start_diff_loss
 
             loss.backward()
-            optimizer.step_and_update_lr()
+            optimizer.step()
+            lrScheduler.step()
 
             if step % output_interval == 0:
                 itr.set_description("pitch: %.2f" % (pitch_loss.item()))
@@ -361,7 +404,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         sw.add_scalar("training/end_loss", end_loss.item(), step)
                         # if prob_model == "l1":
                         #     sw.add_scalar("training/start_diff_loss", start_diff_loss.item(), step)
-                sw.add_scalar("training/lr", optimizer._optimizer.param_groups[0]["lr"], step)
+                sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
                 # sw.add_scalar("training/mix_t", t, step)
 
             if step % val_interval == 0:
@@ -451,7 +494,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 diou_loss = time_loss_alpha * 0.5 * (masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
-                        loss = pitch_loss + start_loss + dur_loss + start_t_loss + end_loss + diou_loss
+                        loss = pitch_loss + time_lambda * (start_loss + dur_loss + start_t_loss + end_loss + diou_loss)
 
                         if i < 1:
                             b = begin_time
@@ -557,7 +600,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 checkpoint_path.mkdir(exist_ok=True)
                 save_path = checkpoint_path / "cur"
                 obj = {"model": model.state_dict(),
-                       "optim": optimizer._optimizer.state_dict(),
+                       "optim": optimizer.state_dict(),
+                       "scheduler": lrScheduler.state_dict(),
                        "steps": step,
                        "epoch": e,
                        "max_pitch_prec": max_pitch_prec}
