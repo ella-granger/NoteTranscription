@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
 import torch.nn.functional as F
+import torch.nn as nn
 from torch.distributions.normal import Normal
 from torch.distributions.beta import Beta
 import torchaudio
@@ -87,6 +88,8 @@ def masked_diou_loss(start_t_p, dur_p, start_t_g, dur_g, mask):
         inter = torch.min(r_p, r_g) - torch.max(l_p, l_g)
         inter[inter < 0] = 0
         d = torch.abs((l_p + r_p) / 2 - (l_g + r_g) / 2)
+        c[c < d] = d[c < d]
+        c[c <= 0] = 1e-9
 
         b_diou = torch.sum(1 - inter / c + (d/c) ** 2)
         if torch.isnan(b_diou).any():
@@ -139,7 +142,6 @@ def getOptimizerGroup(model, weight_decay):
     for name, module in model.named_modules():
         if isinstance(module, nn.GroupNorm) \
                 or isinstance(module, nn.LayerNorm) \
-                or isinstance(module, LearnableSpatialPositionEmbedding) \
                 or isinstance(module, nn.Embedding):
             noDecay.extend(list(module.parameters()))
         else:

@@ -212,6 +212,7 @@ def cfg():
     mix_k = 0
     epsilon = 0
     seg_len = SEG_LEN
+    time_lambda = 3
 
 
 @ex.automain
@@ -219,7 +220,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
          val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder,
-         scheduled_sampling, prob_model, seg_len):
+         scheduled_sampling, prob_model, seg_len, time_lambda):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
@@ -231,7 +232,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     data_path = Path(data_path)
     test_data = MelDataset(data_path / "mel",
                            data_path / "note",
-                           data_path / "large ensemble.json",
+                           data_path / "test.json",
                            train_mode,
                            seg_len=seg_len,
                            device=device)
@@ -325,10 +326,10 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # _ = input()
 
             frame, _, _ = cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p)
-            # metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
+            metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
             # print(metrics)
-            # for k, v in metrics.items():
-            #     mets[k].append(v)
+            for k, v in metrics.items():
+                mets[k].append(v)
             
             f_c += frame
             # on_c += onset
@@ -353,7 +354,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
             # else:
             #     break
-            # break
+            break
 
     print(f_c)
     frame_p = f_c[1] / f_c[0]
@@ -363,6 +364,6 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     # print("Onset(prec/recall):", on_c[1] / on_c[0], on_c[1] / on_c[2])
     # print("Offset(prec/recall):", off_c[1] / off_c[0], off_c[1] / off_c[2])
 
-    # for k, v in mets.items():
-    #     print(k, np.mean(v), np.std(v))
+    for k, v in mets.items():
+        print(k, np.mean(v), np.std(v))
     

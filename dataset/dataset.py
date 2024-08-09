@@ -62,9 +62,12 @@ class MelDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         index = np.random.randint(len(self.mel_list))
 
+        fid = "rv8B6tMNFJI"
+        index = self.fid_list.index(fid)
+
         mel = self.mel_list[index]
         notes = self.note_list[index]
-        fid = self.fid_list[index]
+        # fid = self.fid_list[index]
 
         # print(mel.size())
 
@@ -79,10 +82,10 @@ class MelDataset(torch.utils.data.Dataset):
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
 
-            # begin_time = 68.000
-            # end_time = 73.120
-            # begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
-            # end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
+            begin_time = 159.344
+            end_time = 164.464
+            begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
+            end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
 
             cur_bar_list = []
             start_flag = False
