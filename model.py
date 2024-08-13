@@ -131,7 +131,8 @@ class NoteTransformer(nn.Module):
             self.end_prj = TimeEncoding(d_model // 4 // len(train_mode), d_model, seg_len)
             # self.start_prj = nn.Linear(1, d_model // 4 // len(train_mode))
             # self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
-        
+        self.dec_mix = MLP(d_model, [d_model, d_model], nn.LayerNorm)
+
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
                                n_head=N_HEAD,
@@ -168,9 +169,11 @@ class NoteTransformer(nn.Module):
     def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False, return_cnn=False):
         return_attns = return_attns & self.enable_encoder
         # mel feature extraction
-        mel = self.cnn(mel)
-        if return_cnn:
-            self.mel_result = mel
+        if not self.decoder_only:
+            mel = self.cnn(mel)
+            if return_cnn:
+                self.mel_result = mel
+        
         mel = torch.permute(mel, (0, 2, 1))
 
         # encoding
@@ -213,6 +216,7 @@ class NoteTransformer(nn.Module):
             # print(dur.size())
             trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
 
+        trg_seq = self.dec_mix(trg_seq)
         if return_attns:
             dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, mel, return_attns=True)
         else:

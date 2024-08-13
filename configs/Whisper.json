@@ -1,0 +1,23 @@
+{
+    "logdir": "new_opt/l1_seg320_layer4_whisper",
+
+    "n_layers": 4,
+    "prob_model": "l1",
+    "seg_len": 320,
+
+    "decoder_only": true,
+
+    "batch_size": 16,
+
+    "learning_rate": 1e-4,
+    "warmup_steps": 12000,
+    "clip_gradient_norm": false,
+    "epochs": 2000,
+    "time_loss_alpha": 1,
+    "enable_encoder": false,
+    "scheduled_sampling": false,
+
+    "train_mode": "T",
+
+    "data_path": "./dataset/YouChorale"
+}
