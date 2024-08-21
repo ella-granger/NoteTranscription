@@ -238,7 +238,7 @@ if __name__ == "__main__":
     # target_dir = Path("./test/WebChorale")
     # target_dir = Path("./test/BachChorale")
     
-    mel_dir = target_dir / "mel"
+    mel_dir = target_dir / "mel_320"
     note_dir = target_dir / "note"
     mel_dir.mkdir(parents=True, exist_ok=True)
     note_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +256,7 @@ if __name__ == "__main__":
     valid = 0
     # for flac in tqdm(flac_list):
     for j, midi_path in tqdm(enumerate(midi_list)):
+        """
         if "aQayyS-N6Tc" in midi_path.stem:
             _ = input()
         if j < 0:
@@ -290,6 +291,7 @@ if __name__ == "__main__":
         if sr != SAMPLE_RATE:
             trans = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
             wave_mono = trans(wave_mono)
+        HOP_LENGTH = 320
         trans_mel = torchaudio.transforms.MelSpectrogram(sample_rate=SAMPLE_RATE,
                                                          n_fft=N_FFT,
                                                          win_length=WIN_LENGTH,
@@ -303,7 +305,7 @@ if __name__ == "__main__":
         with open(mel_dir / ("%s.pkl" % flac.stem), 'wb') as fout:
             pickle.dump(mel_spec, fout, protocol=4)
 
-        """
+        # """
 
         # break
         # _ = input()

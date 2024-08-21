@@ -92,7 +92,7 @@ class Decoder(nn.Module):
     ''' A decoder model with self attention mechanism. '''
 
     def __init__(
-            self, d_word_vec, n_layers, n_head, d_model, d_inner,
+            self, d_word_vec, n_layers, n_head, d_model, d_inner, d_enc_feat=None,
             n_position=800, dropout=0.1, scale_emb=False):
 
         super().__init__()
@@ -103,7 +103,7 @@ class Decoder(nn.Module):
         self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
-            DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
+            DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, d_enc_feat=d_enc_feat)
             for _ in range(n_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
         self.scale_emb = scale_emb

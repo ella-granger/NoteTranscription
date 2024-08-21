@@ -9,16 +9,20 @@ __author__ = "Yu-Hsiang Huang"
 class MultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
-    def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1):
+    def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1, d_enc_feat=None):
         super().__init__()
 
         self.n_head = n_head
         self.d_k = d_k
         self.d_v = d_v
+        if d_enc_feat is not None:
+            self.d_enc_feat = d_enc_feat
+        else:
+            self.d_enc_feat = d_model
 
         self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.w_vs = nn.Linear(d_model, n_head * d_v, bias=False)
+        self.w_ks = nn.Linear(self.d_enc_feat, n_head * d_k, bias=False)
+        self.w_vs = nn.Linear(self.d_enc_feat, n_head * d_v, bias=False)
         self.fc = nn.Linear(n_head * d_v, d_model, bias=False)
 
         self.attention = ScaledDotProductAttention(temperature=d_k ** 0.5)
@@ -36,6 +40,9 @@ class MultiHeadAttention(nn.Module):
 
         # Pass through the pre-attention projection: b x lq x (n*dv)
         # Separate different heads: b x lq x n x dv
+        # print(q.size())
+        # print(k.size())
+        # print(v.size())
         q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
         k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)

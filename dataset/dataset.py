@@ -11,8 +11,8 @@ from dataset.constants import *
 
 
 class MelDataset(torch.utils.data.Dataset):
-    def __init__(self, mel_dir, note_dir, id_json, train_mode,
-                 seg_len=320, shuffle=True, device="cpu"):
+    def __init__(self, data_path, split, train_mode,
+                 seg_len=320, shuffle=True, device="cpu", hop_len=HOP_LENGTH):
         super().__init__()
 
         self.voice_list = ["S", "A", "T", "B"]
@@ -20,6 +20,12 @@ class MelDataset(torch.utils.data.Dataset):
         self.seg_len = seg_len
         self.shuffle = shuffle
         self.device = device
+        self.hop_len = hop_len
+
+        mel_dir = data_path / "mel_320"
+        note_dir = data_path / "note"
+        whisper_dir = data_path / "whisper"
+        id_json = data_path / ("%s.json" % split)
 
         mel_dir = Path(mel_dir)
         note_dir = Path(note_dir)
@@ -35,6 +41,7 @@ class MelDataset(torch.utils.data.Dataset):
 
         self.mel_list = []
         self.note_list = []
+        self.whisper_list = []
         self.dataset_len = 0
 
         self.fid_list = []
@@ -44,9 +51,12 @@ class MelDataset(torch.utils.data.Dataset):
             self.fid_list.append(f.stem)
             with open(f, 'rb') as fin:
                 mel = pickle.load(fin)
+            with open(whisper_dir / f.name, "rb") as fin:
+                whisper = pickle.load(fin)
             with open(note_dir / ("%s.pkl" % f.stem), "rb") as fin:
                 note = pickle.load(fin)
             self.mel_list.append(mel)
+            self.whisper_list.append(whisper)
             self.note_list.append(note)
 
             data_length = self.get_length(mel, note)
@@ -62,12 +72,13 @@ class MelDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         index = np.random.randint(len(self.mel_list))
 
-        fid = "rv8B6tMNFJI"
-        index = self.fid_list.index(fid)
+        # fid = "rv8B6tMNFJI"
+        # index = self.fid_list.index(fid)
 
         mel = self.mel_list[index]
+        whisper = self.whisper_list[index]
         notes = self.note_list[index]
-        # fid = self.fid_list[index]
+        fid = self.fid_list[index]
 
         # print(mel.size())
 
@@ -79,13 +90,13 @@ class MelDataset(torch.utils.data.Dataset):
         else:
             begin_idx = np.random.randint(total_length - self.seg_len + 1)
             end_idx = begin_idx + self.seg_len
-            begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
-            end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
+            begin_time = begin_idx * self.hop_len / SAMPLE_RATE
+            end_time = end_idx * self.hop_len / SAMPLE_RATE
 
-            begin_time = 159.344
-            end_time = 164.464
-            begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
-            end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
+            # begin_time = 159.344
+            # end_time = 164.464
+            # begin_idx = int(begin_time * SAMPLE_RATE / self.hop_len)
+            # end_idx = int(end_time * SAMPLE_RATE / self.hop_len)
 
             cur_bar_list = []
             start_flag = False
@@ -177,6 +188,7 @@ class MelDataset(torch.utils.data.Dataset):
             # print(dur)
             
             mel = mel[:, begin_idx:end_idx]
+            whisper = whisper[:, begin_idx:end_idx]
             token.insert(0, MAX_MIDI+1)
             token.append(MAX_MIDI+2)
             token = torch.LongTensor(token)
@@ -224,6 +236,7 @@ class MelDataset(torch.utils.data.Dataset):
 
         if self.train_mode == "S":
             data_point = dict(mel=mel,
+                              whisper=whisper,
                               pitch=token,
                               start=start,
                               dur=dur,
@@ -232,6 +245,7 @@ class MelDataset(torch.utils.data.Dataset):
                               fid=fid)
         elif self.train_mode == "T":
             data_point = dict(mel=mel,
+                              whisper=whisper,
                               pitch=token,
                               start_t=start_t,
                               end=end,
@@ -240,6 +254,7 @@ class MelDataset(torch.utils.data.Dataset):
                               fid=fid)
         else:
             data_point = dict(mel=mel,
+                              whisper=whisper,
                               pitch=token,
                               start=start,
                               dur=dur,
@@ -272,6 +287,7 @@ class MelDataset(torch.utils.data.Dataset):
                 v = pad_and_stack(v, pad_dict[key])
             result[key] = v
         result["mel"] = torch.stack(result["mel"])
+        result["whisper"] = torch.stack(result["whisper"])
 
         return result
             
@@ -292,7 +308,7 @@ class MelDataset(torch.utils.data.Dataset):
                             note_length = note[-1]
                 break
         # print(note_length)
-        note_length = int(note_length * SAMPLE_RATE / HOP_LENGTH)
+        note_length = int(note_length * SAMPLE_RATE / self.hop_len)
         # print(mel_length)
         # print(note_length)
         # _ = input()

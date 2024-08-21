@@ -1,20 +1,23 @@
 {
-    "logdir": "new_opt/l1_seg320_layer4_whisper",
+    "logdir": "new_opt/l1_seg320_layer4_hop320",
 
     "n_layers": 4,
     "prob_model": "l1",
     "seg_len": 320,
+    "hop_len": 320,
+    "d_enc_feat": 256,
 
-    "decoder_only": true,
+    "decoder_only": false,
 
-    "batch_size": 16,
+    "batch_size": 32,
 
     "learning_rate": 1e-4,
     "warmup_steps": 12000,
     "clip_gradient_norm": false,
     "epochs": 2000,
     "time_loss_alpha": 1,
-    "enable_encoder": false,
+    "enable_encoder": true,
+    "whisper_feat": false,
     "scheduled_sampling": false,
 
     "train_mode": "T",

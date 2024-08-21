@@ -87,26 +87,33 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, d_enc_feat=None, seg_len=320, enable_encoder=True, decoder_only=False, whisper_feat=False, alpha=10, prob_model="gaussian"):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
         self.enable_encoder = enable_encoder
+        self.decoder_only = decoder_only
         self.prob_model = prob_model
         self.seg_len = seg_len
+        self.whisper_feat = whisper_feat
+        if d_enc_feat is not None:
+            self.d_enc_feat = d_enc_feat
+        else:
+            self.d_enc_feat = d_model
 
         # ConvNet
         # """
-        padding_len = kernel_size // 2
-        self.cnn = nn.Sequential(
-            nn.Conv1d(N_MELS, d_model, kernel_size, padding=padding_len),
-            nn.BatchNorm1d(d_model),
-            nn.ReLU(),
-            nn.Conv1d(d_model, d_model, kernel_size, padding=padding_len),
-            nn.BatchNorm1d(d_model),
-            nn.ReLU(),
-            nn.Dropout(0.1)
-        )
+        if not self.decoder_only:
+            padding_len = kernel_size // 2
+            self.cnn = nn.Sequential(
+                nn.Conv1d(N_MELS, d_model, kernel_size, padding=padding_len),
+                nn.BatchNorm1d(d_model),
+                nn.ReLU(),
+                nn.Conv1d(d_model, d_model, kernel_size, padding=padding_len),
+                nn.BatchNorm1d(d_model),
+                nn.ReLU(),
+                nn.Dropout(0.1)
+            )
         # """
         # self.cnn = ConvStack(N_MELS, d_model)
 
@@ -133,11 +140,13 @@ class NoteTransformer(nn.Module):
             # self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
         self.dec_mix = MLP(d_model, [d_model, d_model], nn.LayerNorm)
 
+        # print(d_enc_feat)
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
                                n_head=N_HEAD,
                                d_model=d_model,
-                               d_inner=d_inner)
+                               d_inner=d_inner,
+                               d_enc_feat=d_enc_feat)
 
         # Result
         # self.trg_pitch_prj = nn.Linear(d_model, PAD_IDX+1)
@@ -166,15 +175,20 @@ class NoteTransformer(nn.Module):
 
         self.train_mode = train_mode
 
-    def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False, return_cnn=False):
+    def forward(self, mel, whisper, pitch, start_s, dur, start_t, end, return_attns=False, return_cnn=False):
         return_attns = return_attns & self.enable_encoder
         # mel feature extraction
         if not self.decoder_only:
             mel = self.cnn(mel)
-            if return_cnn:
-                self.mel_result = mel
+        if return_cnn:
+            self.mel_result = mel
         
+        # print(mel.size())
         mel = torch.permute(mel, (0, 2, 1))
+        whisper = torch.permute(whisper, (0, 2, 1))
+        # print(mel.size())
+        # print(whisper.size())
+        # _ = input()
 
         # encoding
         if self.enable_encoder:
@@ -185,6 +199,12 @@ class NoteTransformer(nn.Module):
 
         if return_cnn:
             self.enc_result = torch.permute(mel, (0, 2, 1))
+
+        if self.whisper_feat:
+            mel = torch.cat([mel, whisper], dim=-1)
+
+        # print(mel.size())
+        # _ = input()
 
         # decoding
         trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
@@ -217,6 +237,9 @@ class NoteTransformer(nn.Module):
             trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
 
         trg_seq = self.dec_mix(trg_seq)
+        # print(trg_seq.size())
+        # print(trg_mask.size())
+        # print(mel.size())
         if return_attns:
             dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, mel, return_attns=True)
         else:

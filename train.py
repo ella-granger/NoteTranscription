@@ -175,7 +175,11 @@ def config():
     epsilon = 0.1
     loss_norm = 1
     time_lambda = 3
+    d_enc_feat = 512
+    hop_len = HOP_LENGTH
+    whisper_feat = False
     enable_encoder = True
+    decoder_only = False
     scheduled_sampling = False
 
 
@@ -185,6 +189,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           clip_gradient_norm, epochs, data_path,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, train_mode, enable_encoder,
+          decoder_only, hop_len, d_enc_feat, whisper_feat,
           scheduled_sampling, prob_model, seg_len, time_lambda):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
@@ -194,19 +199,23 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     save_config(ex.current_run.config, logdir / "config.json")
 
     data_path = Path(data_path)
-    train_data = MelDataset(data_path / "mel",
-                            data_path / "note",
-                            data_path / "train.json",
+    if decoder_only:
+        mel_path = data_path / "whisper"
+    else:
+        mel_path = data_path / "mel"
+    train_data = MelDataset(data_path,
+                            "train",
                             train_mode,
                             seg_len=seg_len,
-                            device=device)
+                            device=device,
+                            hop_len=hop_len)
 
-    valid_data = MelDataset(data_path / "mel",
-                            data_path / "note",
-                            data_path / "valid.json",
+    valid_data = MelDataset(data_path,
+                            "valid",
                             train_mode,
                             seg_len=seg_len,
-                            device=device)
+                            device=device,
+                            hop_len=hop_len)
 
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=False,
                               collate_fn=train_data.collate_fn, num_workers=8)
@@ -220,7 +229,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             seg_len=seg_len,
                             train_mode=train_mode,
                             enable_encoder=enable_encoder,
-                            prob_model=prob_model)
+                            decoder_only=decoder_only,
+                            whisper_feat=whisper_feat,
+                            prob_model=prob_model,
+                            d_enc_feat=d_enc_feat)
     total_params = sum(p.numel() for p in model.parameters())
     print(total_params)
     # exit()
@@ -263,6 +275,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         itr = tqdm(train_loader)
         for x in itr:
             mel = x["mel"].to(device)
+            whisper = x["whisper"].to(device)
             pitch = x["pitch"].to(device)
 
             start_i = None
@@ -291,7 +304,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
             if not scheduled_sampling:
                 optimizer.zero_grad()
-            result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
+            result = model(mel, whisper, pitch_i, start_i, dur_i, start_t_i, end_i)
 
             if scheduled_sampling:
                 if train_mode == "S":
@@ -427,6 +440,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
                         pitch = batch["pitch"].to(device)
+                        whisper = batch["whisper"].to(device)
                         # print(batch["fid"], batch["begin_time"], batch["end_time"])
                         fid = batch["fid"][0]
                         begin_time = batch["begin_time"][0]
@@ -452,7 +466,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             end_i, end_o = patch_trg(end)
 
                         # result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_attns=True)
-                        result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_cnn=True)
+                        result = model(mel, whisper, pitch_i, start_i, dur_i, start_t_i, end_i, return_cnn=True)
                         mel_result = model.mel_result
                         enc_result = model.enc_result
                         if train_mode == "S":
