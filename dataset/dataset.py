@@ -203,50 +203,50 @@ class MelDataset(torch.utils.data.Dataset):
             # print(start)
             # print(dur)
             
-            token.insert(0, MAX_MIDI+1)
-            token.append(MAX_MIDI+2)
-            token = torch.LongTensor(token)
-            token[token>0] = token[token>0] - MIN_MIDI + 1
+        token.insert(0, MAX_MIDI+1)
+        token.append(MAX_MIDI+2)
+        token = torch.LongTensor(token)
+        token[token>0] = token[token>0] - MIN_MIDI + 1
 
-            if "S" in self.train_mode:
-                start.insert(0, 0.0)
-                dur.insert(0, 0.0)
-                start.append(0.0)
-                dur.append(0.0)
+        if "S" in self.train_mode:
+            start.insert(0, 0.0)
+            dur.insert(0, 0.0)
+            start.append(0.0)
+            dur.append(0.0)
 
-                start = np.array(start) / 0.25
-                dur = np.array(dur) / 0.25
+            start = np.array(start) / 0.25
+            dur = np.array(dur) / 0.25
 
-                start = start.astype(int)
-                dur = dur.astype(int)
-                
-                start = torch.LongTensor(start)
-                dur = torch.LongTensor(dur)
-                dur = torch.clip(dur, 0, MAX_DUR)
-                
-            if "T" in self.train_mode:
-                start_t.insert(0, begin_time)
-                if len(end) == 0:
-                    start_t.append(end_time)
-                else:
-                    start_t.append(max(end))
-                end.insert(0, begin_time)
-                if len(end) == 1:
-                    end.append(end_time)
-                else:
-                    end.append(max(end))
-                start_t = torch.FloatTensor(start_t)
-                end = torch.FloatTensor(end)
+            start = start.astype(int)
+            dur = dur.astype(int)
 
-                start_t = (start_t - begin_time) / (end_time - begin_time)
-                end = (end - begin_time) / (end_time - begin_time)
+            start = torch.LongTensor(start)
+            dur = torch.LongTensor(dur)
+            dur = torch.clip(dur, 0, MAX_DUR)
 
-                start_t = torch.clip(start_t, 0.0, 1.0)
-                end = torch.clip(end, 0.0, 1.0)
+        if "T" in self.train_mode:
+            start_t.insert(0, begin_time)
+            if len(end) == 0:
+                start_t.append(end_time)
+            else:
+                start_t.append(max(end))
+            end.insert(0, begin_time)
+            if len(end) == 1:
+                end.append(end_time)
+            else:
+                end.append(max(end))
+            start_t = torch.FloatTensor(start_t)
+            end = torch.FloatTensor(end)
 
-                # increment
-                end = end - start_t
-                # start_t[1:] = start_t[1:] - start_t[:-1]
+            start_t = (start_t - begin_time) / (end_time - begin_time)
+            end = (end - begin_time) / (end_time - begin_time)
+
+            start_t = torch.clip(start_t, 0.0, 1.0)
+            end = torch.clip(end, 0.0, 1.0)
+
+            # increment
+            end = end - start_t
+            # start_t[1:] = start_t[1:] - start_t[:-1]
 
         if self.train_mode == "S":
             data_point = dict(mel=mel,
