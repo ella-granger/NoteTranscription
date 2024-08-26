@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
 from dataset.dataset import MelDataset
-from model import NoteTransformer
+from model import NoteTransformer, DETRLoss
 from transformer.Optim import ScheduledOptim
 from tqdm import tqdm
 from dataset.constants import *
@@ -226,6 +226,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     # exit()
     model = model.to(device)
 
+    loss_cal = DETRLoss(num_classes, weight_dict)
+
     optimizerGroup = getOptimizerGroup(model, 1e-2)
     optimizer = optim.AdaBelief(
         optimizerGroup,
@@ -276,13 +278,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 start_t = x["start_t"].to(device)
                 end = x["end"].to(device)
 
-            pitch_i, pitch_o = patch_trg(pitch)
-            if "S" in train_mode:
-                start_i, start_o = patch_trg(start)
-                dur_i, dur_o = patch_trg(dur)
-            if "T" in train_mode:
-                start_t_i, start_t_o = patch_trg(start_t)
-                end_i, end_o = patch_trg(end)
+            # pitch_i, pitch_o = patch_trg(pitch)
+            # if "S" in train_mode:
+            #     start_i, start_o = patch_trg(start)
+            #     dur_i, dur_o = patch_trg(dur)
+            # if "T" in train_mode:
+            #     start_t_i, start_t_o = patch_trg(start_t)
+            #     end_i, end_o = patch_trg(end)
 
             # print(start_t_o[0])
             # print(end_o[0])
@@ -291,7 +293,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
             if not scheduled_sampling:
                 optimizer.zero_grad()
-            result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i)
+            result = model(mel)
 
             if scheduled_sampling:
                 if train_mode == "S":
@@ -332,7 +334,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 dur_p = None
             else:
                 pitch_p, start_t_p, end_p, start_p, dur_p = result
-
+            
             start_loss = 0
             dur_loss = 0
             start_t_loss = 0
@@ -343,47 +345,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                 dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
             if "T" in train_mode:
-                seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
-                if prob_model == "beta":
-                    # print("start")
-                    start_t_loss = time_loss_alpha * masked_beta_nll(start_t_p, start_t_o, seq_mask)
-                    # print("end")
-                    end_loss = time_loss_alpha * masked_beta_nll(end_p, end_o, seq_mask)
-                elif prob_model == "gaussian":
-                    start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
-                    end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
-                elif prob_model == "gaussian-mu":
-                    start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask, 0.05)
-                    end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask, 0.05)
-                elif prob_model == "l1":
-                    start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
-                    end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
-                    # start_diff_p = start_t_p[:, 1:, :] - start_t_p[:, :-1, :]
-                    # start_diff_o = start_t_o[:, 1:] - start_t_o[:, :-1]
-                    # start_diff_loss = time_loss_alpha * masked_l2_loss(start_diff_p, start_diff_o, seq_mask[:, 1:])
-                elif prob_model == "l2":
-                    start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
-                    end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
-                elif prob_model == "diou":
-                    diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
-                elif prob_model == "l1-diou":
-                    start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask))
-                    try:
-                        diou_loss = 0.5 * time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask)
-                    except Exception as e:
-                        print(x["fid"])
-                        print(x["begin_time"])
-                        print(x["end_time"])
-                        for i in range(len(start_t_o)):
-                            print(start_t_o[i])
-                            print(pitch_o[i])
-                        # print(start_t_o.size())
-                        raise e
-                    end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
-            
-            loss = pitch_loss + time_lambda * (start_loss + dur_loss + start_t_loss + end_loss + diou_loss)
-            # if prob_model == "l1":
-            #     loss += start_diff_loss
+                loss = loss_cal(pitch_p, start_t_p, end_p, pitch, start_t, end)
 
             loss.backward()
             optimizer.step()
@@ -394,6 +356,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
             if step % summary_interval == 0:
                 sw.add_scalar("training/loss", loss.item(), step)
+                """
                 sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
                 if "S" in train_mode:
                     sw.add_scalar("training/start_loss", start_loss.item(), step)
@@ -406,6 +369,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         sw.add_scalar("training/end_loss", end_loss.item(), step)
                         # if prob_model == "l1":
                         #     sw.add_scalar("training/start_diff_loss", start_diff_loss.item(), step)
+                """
                 sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
                 # sw.add_scalar("training/mix_t", t, step)
 

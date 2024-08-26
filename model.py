@@ -87,13 +87,14 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian", num_queries=800):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
         self.enable_encoder = enable_encoder
         self.prob_model = prob_model
         self.seg_len = seg_len
+        self.num_queries = num_queries
 
         # ConvNet
         # """
@@ -131,6 +132,8 @@ class NoteTransformer(nn.Module):
             self.end_prj = TimeEncoding(d_model // 4 // len(train_mode), d_model, seg_len)
             # self.start_prj = nn.Linear(1, d_model // 4 // len(train_mode))
             # self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
+
+        self.query_embed = nn.Embedding(num_queries, d_model)
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
@@ -165,7 +168,7 @@ class NoteTransformer(nn.Module):
 
         self.train_mode = train_mode
 
-    def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False, return_cnn=False):
+    def forward(self, mel, return_attns=False, return_cnn=False):
         return_attns = return_attns & self.enable_encoder
         # mel feature extraction
         mel = self.cnn(mel)
@@ -184,39 +187,11 @@ class NoteTransformer(nn.Module):
             self.enc_result = torch.permute(mel, (0, 2, 1))
 
         # decoding
-        trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
-
-        if "T" in self.train_mode:
-            start_t = torch.unsqueeze(start_t, -1)
-            end = torch.unsqueeze(end, -1)
-            start_t = self.start_prj(start_t)
-            end = self.end_prj(end)
-            # start = self.time_enc(start)
-            # end = self.time_enc(end)
-        pitch = self.trg_pitch_emb(pitch)
-        if "S" in self.train_mode:
-            start_s = self.trg_start_emb(start_s)
-            dur = self.trg_dur_emb(dur)
-
-        if self.train_mode == "T":
-            # print(pitch.size())
-            # print(start_t.size())
-            # print(end.size())
-            trg_seq = torch.cat([pitch, start_t, end], dim=-1)
-        elif self.train_mode == "S":
-            trg_seq = torch.cat([pitch, start_s, dur], dim=-1)
-        else:
-            # print(pitch.size())
-            # print(start_t.size())
-            # print(end.size())
-            # print(start_s.size())
-            # print(dur.size())
-            trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
-
+        queries = self.query_embed.weight
         if return_attns:
-            dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, mel, return_attns=True)
+            dec, dec_self_attn, dec_enc_attn = self.decoder(queries, None, mel, return_attns=True)
         else:
-            dec, *_ = self.decoder(trg_seq, trg_mask, mel)
+            dec, *_ = self.decoder(queries, None, mel)
 
         # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
         pitch_out = self.trg_pitch_prj(dec)
@@ -226,21 +201,11 @@ class NoteTransformer(nn.Module):
             start_s_out = self.trg_start_s_prj(dec)
             dur_out = self.trg_dur_s_prj(dec)
         if "T" in self.train_mode:
-            # start_t_out = self.trg_start_t_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-            # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
             start_t_out = self.trg_start_t_prj(dec)
             end_out = self.trg_end_prj(dec)
             
             start_t_out = F.sigmoid(start_t_out)
             end_out = F.sigmoid(end_out)
-            # start_t_out = F.elu(start_t_out) + 2
-            # end_out = F.elu(end_out) + 2
-        
-        # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
-        # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-        # start_out = F.sigmoid(start_out)
-        # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
-        # end_out = F.sigmoid(end_out)
 
         if self.train_mode == "T":
             result = (pitch_out, start_t_out, end_out)
@@ -510,6 +475,27 @@ class NoteTransformer(nn.Module):
             return pitch, start, dur
         else:
             return pitch, start_t, end, start, dur
+
+
+class DETRLoss(nn.Module):
+
+    def __init__(self, num_classes, weight_dict):
+        self.num_classes = num_classes
+        self.weight_dict = weight_dict
+
+
+    def match(self):
+        return
+
+
+    def forward(self, pitch_p, start_p, end_p, pitch_t, start_t, end_t):
+        print(pitch_p.size())
+        print(start_p.size())
+        print(end_p.size())
+        print(pitch_t.size())
+        print(start_t.size())
+        print(end_t.size())
+        return
         
 
 
