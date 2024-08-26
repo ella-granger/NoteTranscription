@@ -220,6 +220,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     print_config(ex.current_run)
 
     data_path = "./dataset/test/BachChorale"
+    data_path = "/storageNVME/huiran/NoteTranscription/BachChorale_Rev"
     # data_path = "./dataset/test/WebChorale"
     # data_path = "/storageNVME/huiran/NoteTranscription/BachChorale"
 
@@ -329,7 +330,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # on_c += onset
             # off_c += offset
 
-            if i < 5:
+            if i < 10:
                 if "S" in train_mode:
                     pred_list = get_list_s(pitch_p, start_p, dur_p)
                     gt_list = get_list_s(pitch, start, dur)
@@ -346,6 +347,11 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     fig_pred.savefig(logdir / ("pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
                     fig_gt = plot_midi(*gt_list, inc=True)
                     fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
+
+                    ratio = seg_len * HOP_LENGTH / SAMPLE_RATE
+                    save_midi(pitch_p, start_t_p, end_p, logdir / ("pred_trans_%d_%s_%.2f_%.2f.mid" % (i, fid, begin_time, end_time)), ratio, inc=True)
+                    save_midi(pitch, start_t, end, logdir / ("gt_trans_%d_%s_%.2f_%.2f.mid" % (i, fid, begin_time, end_time)), ratio, inc=True)
+
             # else:
             #     break
             # break

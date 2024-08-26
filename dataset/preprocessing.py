@@ -77,14 +77,16 @@ if __name__ == "__main__":
     # content_dir = Path("/storageSSD/huiran/NoteTranscription/BachChorale/BachChorale")
     # target_dir = Path("/storageSSD/huiran/NoteTranscription")
     # content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/midi_align")
-    content_dir = Path("/media/ella/Yu/UR/datasets/BachChorale/audio")
-    target_dir = Path("./test")
-    mel_dir = target_dir / "BachChorale" / "mel"
-    note_dir = target_dir / "BachChorale" / "note"
+    content_dir = Path("/storageNVME/huiran/NoteTranscription/BachChorale_Rev/flac")
+    target_dir = Path("/storageNVME/huiran/NoteTranscription/BachChorale_Rev")
+    # mel_dir = target_dir / "BachChorale" / "mel"
+    # note_dir = target_dir / "BachChorale" / "note"
+    mel_dir = target_dir / "mel"
+    note_dir = target_dir / "note"
     mel_dir.mkdir(parents=True, exist_ok=True)
     note_dir.mkdir(parents=True, exist_ok=True)
     
-    flac_list = list(content_dir.glob("*.WAV"))
+    flac_list = list(content_dir.glob("*.flac"))
     midi_list = list(content_dir.glob("*.mid"))
 
     for flac in tqdm(flac_list):

@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from dataset.constants import *
+import pretty_midi
 
 
 def plot_attn(attn):
@@ -25,6 +27,28 @@ def plot_spec(spec):
     return fig
 
 
+def save_midi(pitch, start, end, fname, ratio, inc=False):
+    if type(pitch) != list:
+        pitch, start, end = get_list_t(pitch, start, end)
+
+    if inc:
+        for i in range(len(start)):
+            end[i] += start[i]
+
+    output = pretty_midi.PrettyMIDI()
+    track = pretty_midi.Instrument(program=1)
+    for n, s, e in zip(pitch, start, end):
+        p = n + MIN_MIDI - 1
+        s = s * ratio
+        e = e * ratio
+        print(p, s, e)
+        note = pretty_midi.Note(velocity=100, pitch=p, start=s, end=e)
+        track.notes.append(note)
+
+    output.instruments.append(track)
+    output.write(str(fname))
+
+
 def plot_midi(pitch, start, end, inc=False):
     # print(pitch)
     # print(start)
@@ -45,12 +69,15 @@ def plot_midi(pitch, start, end, inc=False):
     fig, ax = plt.subplots(figsize=(10, 4))
     for n, s, e in zip(pitch, start, end):
         if s <= e and n > 0:
-            ax.hlines(n, s, e, linewidths=3)
+            ax.hlines(n + MIN_MIDI - 1, s, e, linewidths=3)
         if n == 0:
             ax.vlines(s, min(pitch), max(pitch), linestyles="--", linewidths=2)
 
-    ax.scatter(start, pitch)
-    ax.scatter(end, pitch, marker="x")
+    pitch = np.array(pitch)
+    start = np.array(start)
+    end = np.array(end)
+    ax.scatter(start, pitch + MIN_MIDI - 1)
+    ax.scatter(end, pitch + MIN_MIDI - 1, marker="x")
     fig.canvas.draw()
     plt.close()
     return fig
