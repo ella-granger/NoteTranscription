@@ -1,21 +1,27 @@
 {
-    "logdir": "new_opt/l1diou_seg320_layer4",
+    "logdir": "detr/test_empty_0.1_num_q_100_box_0.1_l1_0.1_pitch_2.0_n_head_8_single",
 
-    "n_layers": 4,
+    "n_layers": 6,
+    "n_head": 8,
     "prob_model": "l1-diou",
     "seg_len": 320,
+    "num_samples": 100,
+    "empty_weight": 0.1,
 
     "batch_size": 16,
 
-    "learning_rate": 1e-4,
+    "learning_rate": 4e-4,
     "warmup_steps": 12000,
     "clip_gradient_norm": false,
     "epochs": 2000,
     "time_loss_alpha": 1,
     "enable_encoder": true,
     "scheduled_sampling": false,
-
+    "weight_dict": {"box": 0.1,
+		    "l1": 0.1,
+		    "pitch": 2.0},
     "train_mode": "T",
+    "val_interval": 300,
 
     "data_path": "./dataset/YouChorale"
 }

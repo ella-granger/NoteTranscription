@@ -7,6 +7,7 @@ from torchvision.ops import MLP
 from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_mask
 from dataset.constants import *
 from tqdm import tqdm
+from scipy.optimize import linear_sum_assignment
 
 
 def get_mix_mask(pitch, t):
@@ -87,7 +88,7 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian", num_queries=800):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian", num_queries=800, n_head=8):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
@@ -116,13 +117,14 @@ class NoteTransformer(nn.Module):
         if enable_encoder:
             self.encoder = Encoder(d_word_vec=d_model,
                                    n_layers=n_layers,
-                                   n_head=N_HEAD,
+                                   n_head=n_head,
                                    d_model=d_model,
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
                                    scale_emb=True)
 
         # Decoder
+        """
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model // 2, padding_idx=PAD_IDX)
         if "S" in train_mode:
             self.trg_start_emb = nn.Embedding(MAX_START+2, d_model // 4 // len(train_mode), padding_idx=MAX_START+1)
@@ -132,18 +134,19 @@ class NoteTransformer(nn.Module):
             self.end_prj = TimeEncoding(d_model // 4 // len(train_mode), d_model, seg_len)
             # self.start_prj = nn.Linear(1, d_model // 4 // len(train_mode))
             # self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
+        """
 
         self.query_embed = nn.Embedding(num_queries, d_model)
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
-                               n_head=N_HEAD,
+                               n_head=n_head,
                                d_model=d_model,
                                d_inner=d_inner)
 
         # Result
         # self.trg_pitch_prj = nn.Linear(d_model, PAD_IDX+1)
-        self.trg_pitch_prj = MLP(d_model, [d_model, d_model, PAD_IDX+1])
+        self.trg_pitch_prj = MLP(d_model, [d_model, d_model, NUM_CLS+1])
         # self.trg_start_prj = nn.Linear(d_model // 8, 1)
         # self.trg_end_prj = nn.Linear(d_model // 8, 1)
         # self.trg_pitch_prj = nn.Linear(d_model * 3 // 4, PAD_IDX+1)
@@ -188,6 +191,12 @@ class NoteTransformer(nn.Module):
 
         # decoding
         queries = self.query_embed.weight
+        B = mel.size(0)
+        # print(queries.size()) # (N_queries, d_model)
+        queries = queries.unsqueeze(0).repeat(B, 1, 1)
+        # print(queries.size()) # (N_queries, d_model)
+        # print(mel.size()) # (B, L, d_model)
+        # _ = input()
         if return_attns:
             dec, dec_self_attn, dec_enc_attn = self.decoder(queries, None, mel, return_attns=True)
         else:
@@ -315,8 +324,8 @@ class NoteTransformer(nn.Module):
         elif self.train_mode == "S":
             return pitch_out, start_s_out, dur_out
         else:
-            return pitch_out, start_t_out, end_out, start_s_out, dur_out           
-
+            return pitch_out, start_t_out, end_out, start_s_out, dur_out
+        
 
     def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, beam_size=2):
         device = mel.device
@@ -479,24 +488,138 @@ class NoteTransformer(nn.Module):
 
 class DETRLoss(nn.Module):
 
-    def __init__(self, num_classes, weight_dict):
+    def __init__(self, num_classes, weight_dict, empty_weight):
+        super(DETRLoss, self).__init__()
         self.num_classes = num_classes
         self.weight_dict = weight_dict
+        self.empty_weight = empty_weight
+        self.loss_dict = {"box": self.loss_box,
+                          "l1": self.loss_l1,
+                          "pitch": self.loss_p}
+        self.loss_dict = {k:v for k,v in self.loss_dict.items() if k in self.weight_dict}
+        self.lambda_l1 = 1
+        self.labmda_diou = 0.4
 
 
-    def match(self):
-        return
+    def loss_p(self, pred, trg):
+        p_p = pred[0]
+        p_t = trg[0][:trg[-1]]
 
-
-    def forward(self, pitch_p, start_p, end_p, pitch_t, start_t, end_t):
-        print(pitch_p.size())
-        print(start_p.size())
-        print(end_p.size())
-        print(pitch_t.size())
-        print(start_t.size())
-        print(end_t.size())
-        return
+        # print(p_p.size())
+        # _ = input()
+        # p_p = F.softmax(p_p, dim=-1)
         
+        loss = -p_p[:, p_t]
+        return loss
+
+
+    def loss_box(self, pred, trg):
+        length = trg[-1]
+        # print(length)
+        # print(trg[1].size())
+
+        start_p = pred[1]
+        end_p = pred[2]
+        start_t = trg[1][:length]
+        end_t = trg[2][:length]
+
+        N = start_p.size(0)
+
+        start_p = start_p.repeat(1, length)
+        end_p = end_p.repeat(1, length)
+        start_t = start_t.unsqueeze(0).repeat(N, 1)
+        end_t = end_t.unsqueeze(0).repeat(N, 1)
+
+        c = torch.max(end_p, end_t) - torch.min(start_p, start_t)
+        inter = torch.min(end_p, end_t) - torch.max(start_p, start_t)
+        inter[inter < 0] = 0
+        d = torch.abs((start_p + end_p) / 2 - (start_t + end_t) / 2)
+
+        loss = 1 - inter / c + (d/c) ** 2
+        return loss
+
+
+    def loss_l1(self, pred, trg):
+        length = trg[-1]
+
+        start_p = pred[1]
+        end_p = pred[2]
+        start_t = trg[1][:length]
+        end_t = trg[2][:length]
+
+        N = start_p.size(0)
+
+        start_p = start_p.repeat(1, length)
+        end_p = end_p.repeat(1, length)
+        start_t = start_t.unsqueeze(0).repeat(N, 1)
+        end_t = end_t.unsqueeze(0).repeat(N, 1)
+
+        start_loss = torch.abs(start_p - start_t)
+        end_loss = torch.abs(end_p - end_t)
+
+        loss = start_loss + end_loss
+        return loss
+
+
+    def forward(self, pitch_p, start_p, end_p, pitch, start, end, length):
+        # print(pitch_p.size())
+        # print(start_p.size())
+        # print(pitch.size())
+        pitch_p = F.softmax(pitch_p, dim=-1)
+
+        B = pitch_p.size(0)
+        N = pitch_p.size(1)
+        losses = []
+
+        out_mat = None
+        for i in range(B):
+            pred = (pitch_p[i], start_p[i], end_p[i], length[i])
+            trg = (pitch[i], start[i], end[i], length[i])
+
+            # Calculate each single loss
+            loss_dict = {}
+            for k, func in self.loss_dict.items():
+                loss_dict[k] = func(pred, trg)
+
+            loss_i = 0
+            for k, v in loss_dict.items():
+                loss_i += v * self.weight_dict[k]
+
+            # print(loss_i.size())
+
+            # Find the matching path
+            mat = loss_i.detach().cpu().numpy()
+            row, col = linear_sum_assignment(mat)
+
+            if out_mat is None:
+                out_mat = (mat, row, col)
+                self.loss_dict_run = loss_dict
+            # print(row)
+            # print(col)
+
+            # Calculate loss along the matching path
+            loss_i = torch.sum(loss_i[row, col])
+            if len(row) > 0:
+                loss_i /= len(row)
+
+            # for k, v in loss_dict.items():
+            #     print(k, torch.sum(v[row, col]).item())
+
+            # Add the empty loss
+            empty_p = pitch_p[i, :, -1]
+            empty_idx = list(set([x for x in range(N)]) - set(row))
+            empty_p = empty_p[empty_idx]
+            # print(empty_p.size())
+            empty_loss =  - torch.sum(empty_p) * self.empty_weight
+            # print(empty_loss.item())
+            empty_loss /= len(empty_idx)
+            loss_i += empty_loss
+            # print(empty_loss.item())
+            # _ = input()
+
+            losses.append(loss_i)
+        
+        return sum(losses), losses, out_mat
 
 
 if __name__ == "__main__":

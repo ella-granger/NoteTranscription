@@ -177,13 +177,16 @@ def config():
     time_lambda = 3
     enable_encoder = True
     scheduled_sampling = False
+    num_samples = 800
+    empty_weight = 0.01
+    n_head = 4
 
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
-          learning_rate, warmup_steps, mix_k, epsilon,
-          clip_gradient_norm, epochs, data_path,
-          output_interval, summary_interval, val_interval,
+          learning_rate, warmup_steps, mix_k, epsilon, empty_weight,
+          clip_gradient_norm, epochs, data_path, num_samples, weight_dict,
+          output_interval, summary_interval, val_interval, n_head,
           loss_norm, time_loss_alpha, train_mode, enable_encoder,
           scheduled_sampling, prob_model, seg_len, time_lambda):
     ex.observers.append(FileStorageObserver.create(logdir))
@@ -203,7 +206,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
     valid_data = MelDataset(data_path / "mel",
                             data_path / "note",
-                            data_path / "valid.json",
+                            data_path / "train.json", # "valid.json",
                             train_mode,
                             seg_len=seg_len,
                             device=device)
@@ -217,16 +220,19 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
+                            n_head=n_head,
                             seg_len=seg_len,
                             train_mode=train_mode,
                             enable_encoder=enable_encoder,
-                            prob_model=prob_model)
+                            prob_model=prob_model,
+                            num_queries=num_samples)
     total_params = sum(p.numel() for p in model.parameters())
     print(total_params)
     # exit()
     model = model.to(device)
 
-    loss_cal = DETRLoss(num_classes, weight_dict)
+    num_classes = NUM_CLS
+    loss_cal = DETRLoss(num_classes, weight_dict, empty_weight)
 
     optimizerGroup = getOptimizerGroup(model, 1e-2)
     optimizer = optim.AdaBelief(
@@ -238,30 +244,36 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         rectify=True
     )
 
-    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 4e-4, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
+    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
     
     # optimizer = ScheduledOptim(
     #     optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
     #     2.0, 256, warmup_steps) # weight decay: 0.01, without embedding
 
     step = 0
-    max_pitch_prec = 0
-    min_pitch_loss = np.inf
+    # min_pitch_loss = np.inf
+    max_note_f1 = 0
     
     ckpt_path = logdir / "ckpt" / "cur"
     if ckpt_path.exists():
         ckpt_dict = torch.load(ckpt_path, map_location=device)
         model.load_state_dict(ckpt_dict["model"])
         step = ckpt_dict["steps"]
-        max_pitch_prec = ckpt_dict["max_pitch_prec"]
+        # max_pitch_prec = ckpt_dict["max_pitch_prec"]
+        max_note_f1 = ckpt_dict["max_note_f1"]
         # optimizer._optimizer.load_state_dict(ckpt_dict["optim"])
         # optimizer.n_steps = step
         optimizer.load_state_dict(ckpt_dict["optim"])
         lrScheduler.load_state_dict(ckpt_dict["scheduler"])
+
+        print(str(ckpt_path), "loaded.")
     
     model.train()
     torch.autograd.set_detect_anomaly(True)
+    fin_flag = False
     for e in range(epochs):
+        if fin_flag:
+            break
         itr = tqdm(train_loader)
         for x in itr:
             mel = x["mel"].to(device)
@@ -340,19 +352,30 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             start_t_loss = 0
             end_loss = 0
             diou_loss = 0
-            pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
+            # pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             if "S" in train_mode:
                 start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                 dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
             if "T" in train_mode:
-                loss = loss_cal(pitch_p, start_t_p, end_p, pitch, start_t, end)
-
+                # print(pitch_p.size())
+                # print(start_t_p.size())
+                # print(end_p.size())
+                # print(pitch.size())
+                # print(start_t.size())
+                # print(end.size())
+                # print(pitch)
+                loss, losses, _ = loss_cal(pitch_p, start_t_p, end_p, pitch, start_t, end, x["length"])
+                # print([x.item() for x in losses])
+                # print(loss.item())
+                
             loss.backward()
             optimizer.step()
             lrScheduler.step()
 
+            # _ = input()
+
             if step % output_interval == 0:
-                itr.set_description("pitch: %.2f" % (pitch_loss.item()))
+                itr.set_description("loss: %.2f" % (loss.item()))
 
             if step % summary_interval == 0:
                 sw.add_scalar("training/loss", loss.item(), step)
@@ -388,7 +411,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_dur_T = 0
                     total_C = 0
                     total_count = 0
+                    total_metrics = {}
                     for i, batch in tqdm(enumerate(eval_loader)):
+                        if i == 500:
+                            break
                         mel = batch["mel"].to(device)
                         pitch = batch["pitch"].to(device)
                         # print(batch["fid"], batch["begin_time"], batch["end_time"])
@@ -407,16 +433,17 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             start_t = batch["start_t"].to(device)
                             end = batch["end"].to(device)
 
-                        pitch_i, pitch_o = patch_trg(pitch)
-                        if "S" in train_mode:
-                            start_i, start_o = patch_trg(start)
-                            dur_i, dur_o = patch_trg(dur)
-                        if "T" in train_mode:
-                            start_t_i, start_t_o = patch_trg(start_t)
-                            end_i, end_o = patch_trg(end)
+                        # pitch_i, pitch_o = patch_trg(pitch)
+                        # if "S" in train_mode:
+                        #     start_i, start_o = patch_trg(start)
+                        #     dur_i, dur_o = patch_trg(dur)
+                        # if "T" in train_mode:
+                        #     start_t_i, start_t_o = patch_trg(start_t)
+                        #     end_i, end_o = patch_trg(end)
 
                         # result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_attns=True)
-                        result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_cnn=True)
+                        # result = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_cnn=True)
+                        result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, return_cnn=True, return_attns=True)
                         mel_result = model.mel_result
                         enc_result = model.enc_result
                         if train_mode == "S":
@@ -425,42 +452,31 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             pitch_p, start_t_p, end_p = result
                         else:
                             pitch_p, start_t_p, end_p, start_p, dur_p = result
-
-                        start_loss = 0
-                        dur_loss = 0
-                        start_t_loss = 0
-                        end_loss = 0
-                        diou_loss = 0
-                        pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
+                        
+                        # pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                         if "S" in train_mode:
                             start_loss = F.cross_entropy(torch.permute(start_p, (0, 2, 1)), start_o, ignore_index=MAX_START+1, reduction='sum')
                             dur_loss = F.cross_entropy(torch.permute(dur_p, (0, 2, 1)), dur_o, ignore_index=0, reduction='sum')
                         if "T" in train_mode:
-                            seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
+                            # print(pitch_p.size())
+                            # _ = input()
+                            loss, losses, out_mat = loss_cal(pitch_p, start_t_p, end_p, pitch, start_t, end, batch["length"])
 
-                            if prob_model == "beta":
-                                start_t_loss = time_loss_alpha * masked_beta_nll(start_t_p, start_t_o, seq_mask)
-                                end_loss = time_loss_alpha * masked_beta_nll(end_p, end_o, seq_mask)
-                            elif prob_model == "gaussian":
-                                start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask)
-                                end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask)
-                            elif prob_model == "gaussian-mu":
-                                start_t_loss = time_loss_alpha * masked_normal_nll(start_t_p, start_t_o, seq_mask, 0.05)
-                                end_loss = time_loss_alpha * masked_normal_nll(end_p, end_o, seq_mask, 0.05)
-                            elif prob_model == "l2":
-                                start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
-                                end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
-                            elif prob_model == "l1":
-                                start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
-                                end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
-                            elif prob_model == "diou":
-                                diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
-                            elif prob_model == "l1-diou":
-                                start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask))
-                                diou_loss = time_loss_alpha * 0.5 * (masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
-                                end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
+                        mat, row, col = out_mat
             
-                        loss = pitch_loss + time_lambda * (start_loss + dur_loss + start_t_loss + end_loss + diou_loss)
+                        total_loss += loss.item()
+                        
+                        note_p, note_s, note_e = decode_notes(pitch_p, start_t_p, end_p)
+                        # print(note_p.size(), note_s.size(), note_e.size(), pitch.size(), start_t.size(), end.size())
+                        try:
+                            metrics = cal_mir_metrics(pitch[0], start_t[0], end[0], note_p, note_s, note_e, seg_len)
+                            for k, v in metrics.items():
+                                if k not in total_metrics:
+                                    total_metrics[k] = 0
+                                total_metrics[k] += v
+                        except Exception as err:
+                            print(err)
+                        total_count += 1
 
                         if i < 1:
                             b = begin_time
@@ -484,16 +500,21 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             sw.add_figure("cnn_%d" % i, plot_spec(mel_result[0].detach().cpu()), step)
                             sw.add_figure("enc_%d" % i, plot_spec(enc_result[0].detach().cpu()), step)
 
+                            # Bipartite
+                            sw.add_figure("Bipartite/total", plot_mat(mat, row, col), step)
+                            sw.add_figure("LossCal/pitch", plot_mat(pitch_p.detach().cpu().numpy()[0], row, pitch[0].detach().cpu()[col]), step)
+                            for k, v in loss_cal.loss_dict_run.items():
+                                sw.add_figure("Bipartite/%s" % k, plot_mat(v.detach().cpu().numpy(), row, col), step)
 
-                            # for a_i, attn in enumerate(enc_attn):
-                            #     sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            # for a_i, attn in enumerate(dec_self_attn):
-                            #     sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            # for a_i, attn in enumerate(dec_enc_attn):
-                            #     sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(enc_attn):
+                                sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(dec_self_attn):
+                                sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(dec_enc_attn):
+                                sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             if "S" in train_mode:
                                 pred_list = get_list_s(pitch_p, start_p, dur_p)
-                                gt_list = get_list_s(pitch_o, start_o, dur_o)
+                                gt_list = get_list_s(pitch, start, dur)
                                 
                                 pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                                 gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
@@ -504,8 +525,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_figure("gt/s_%d" % i, plot_score(pitch_o, start_o, dur_o), step)
                                 sw.add_figure("pred/s_%d" % i, plot_score(pitch_p, start_p, dur_p), step)
                             if "T" in train_mode:
-                                pred_list = get_list_t(pitch_p, start_t_p, end_p, mode=prob_model)
-                                gt_list = get_list_t(pitch_o, start_t_o, end_o, mode=prob_model)
+                                pred_list = get_list_t(note_p, note_s, note_e, mode=prob_model)
+                                gt_list = get_list_t(pitch, start_t, end, mode=prob_model)
+
+                                # print(pred_list)
+                                # print(gt_list)
 
                                 pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
                                 gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
@@ -513,73 +537,44 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("t/%d/gt" % i, str(gt_list), step)
                                 sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
-                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=True), step)
-                                sw.add_figure("pred/t_%d" % i, plot_midi([x[0] for x in pred_list], [x[1] for x in pred_list], [x[2] for x in pred_list], inc=True), step)
+                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch, start_t, end, inc=False), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi([x[0] for x in pred_list], [x[1] for x in pred_list], [x[2] for x in pred_list], inc=False), step)
                             # _ = input()
 
-                        pitch_pred = torch.argmax(pitch_p, dim=-1)
-                        if "S" in train_mode:
-                            start_pred = torch.argmax(start_p, dim=-1)
-                            dur_pred = torch.argmax(dur_p, dim=-1)
-                            total_start_T += torch.sum(start_pred == start_o).item()
-                            total_dur_T += torch.sum(dur_pred == dur_o).item()
-                        total_T += torch.sum(pitch_pred == pitch_o).item()
-                        total_C += pitch_pred.size(1)
-                        total_loss += loss.item()
-                        total_pitch_loss += pitch_loss.item()
-                        if "S" in train_mode:
-                            total_start_loss += start_loss.item()
-                            total_dur_loss += dur_loss.item()
-                        if "T" in train_mode:
-                            if "l1" in prob_model:
-                                total_start_t_loss += start_t_loss.item()
-                                total_end_loss += end_loss.item()
-                            if "diou" in prob_model:
-                                total_diou_loss += diou_loss.item()
-                        total_count += 1
 
+                for k in total_metrics:
+                    total_metrics[k] /= total_count
+                    sw.add_scalar(k, total_metrics[k], step)
+                eval_note_f1 = total_metrics["metric/note/f1"]
                 eval_loss = total_loss / total_count
-                eval_pitch_loss = total_pitch_loss / total_count
+                
                 sw.add_scalar("eval/loss", eval_loss, step)
-                sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
-                if "S" in train_mode:
-                    eval_start_loss = total_start_loss / total_count
-                    eval_dur_loss = total_dur_loss / total_count
-                    sw.add_scalar("eval/start_loss", eval_start_loss, step)
-                    sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
-                if "T" in train_mode:
-                    if "diou" in prob_model:
-                        eval_diou_loss = total_diou_loss / total_count
-                        sw.add_scalar("eval/diou_loss", eval_diou_loss, step)
-                    if "f1" in prob_model:
-                        eval_start_t_loss = total_start_t_loss / total_count
-                        eval_end_loss = total_end_loss / total_count
-                        sw.add_scalar("eval/start_t_loss", eval_start_t_loss, step)
-                        sw.add_scalar("eval/end_loss", eval_end_loss, step)
-                sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
-                if "S" in train_mode:
-                    sw.add_scalar("eval/start_prec", total_start_T / total_C, step)
-                    sw.add_scalar("eval/dur_prec", total_dur_T / total_C, step)
-                print(eval_loss, total_T / total_C)
+                
+                print(eval_loss, eval_note_f1)
 
                 checkpoint_path = logdir / "ckpt"
                 checkpoint_path.mkdir(exist_ok=True)
-                save_path = checkpoint_path / "cur"
+                save_path = checkpoint_path / "cur" # ("cur_%05d" % step)
                 obj = {"model": model.state_dict(),
                        "optim": optimizer.state_dict(),
                        "scheduler": lrScheduler.state_dict(),
                        "steps": step,
                        "epoch": e,
-                       "max_pitch_prec": max_pitch_prec}
-                torch.save(obj, str(save_path))
+                       "max_note_f1": max_note_f1}
+                
+                if step % 100 == 0:
+                    torch.save(obj, str(save_path))
 
                 # if total_T / total_C > max_pitch_prec:
-                if eval_pitch_loss < min_pitch_loss:
+                if eval_note_f1 > max_note_f1:
                     # max_pitch_prec = total_T / total_C
-                    min_pitch_loss = eval_pitch_loss
+                    max_note_f1 = eval_note_f1
                     save_path = checkpoint_path / "best"
                     torch.save(obj, str(save_path))
 
                 model.train()
                 
-            step += 1 
+            step += 1
+            # if step == 10001:
+            #     fin_flag = True
+            #     break

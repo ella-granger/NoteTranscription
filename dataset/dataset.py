@@ -61,13 +61,15 @@ class MelDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         index = np.random.randint(len(self.mel_list))
+        index = 0
 
-        fid = "rv8B6tMNFJI"
-        index = self.fid_list.index(fid)
+        # fid = "rv8B6tMNFJI"
+        # fid = "jd2_r4PK5dc"
+        # index = self.fid_list.index(fid)
 
         mel = self.mel_list[index]
         notes = self.note_list[index]
-        # fid = self.fid_list[index]
+        fid = self.fid_list[index]
 
         # print(mel.size())
 
@@ -82,10 +84,10 @@ class MelDataset(torch.utils.data.Dataset):
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
 
-            begin_time = 159.344
-            end_time = 164.464
-            begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
-            end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
+            # begin_time = 48.224
+            # end_time = 53.344
+            # begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
+            # end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
 
             cur_bar_list = []
             start_flag = False
@@ -177,17 +179,12 @@ class MelDataset(torch.utils.data.Dataset):
             # print(dur)
             
             mel = mel[:, begin_idx:end_idx]
-            token.insert(0, MAX_MIDI+1)
-            token.append(MAX_MIDI+2)
+            # token.insert(0, MAX_MIDI+1)
+            # token.append(MAX_MIDI+2)
             token = torch.LongTensor(token)
             token[token>0] = token[token>0] - MIN_MIDI + 1
 
             if "S" in self.train_mode:
-                start.insert(0, 0.0)
-                dur.insert(0, 0.0)
-                start.append(0.0)
-                dur.append(0.0)
-
                 start = np.array(start) / 0.25
                 dur = np.array(dur) / 0.25
 
@@ -199,16 +196,6 @@ class MelDataset(torch.utils.data.Dataset):
                 dur = torch.clip(dur, 0, MAX_DUR)
                 
             if "T" in self.train_mode:
-                start_t.insert(0, begin_time)
-                if len(end) == 0:
-                    start_t.append(end_time)
-                else:
-                    start_t.append(max(end))
-                end.insert(0, begin_time)
-                if len(end) == 1:
-                    end.append(end_time)
-                else:
-                    end.append(max(end))
                 start_t = torch.FloatTensor(start_t)
                 end = torch.FloatTensor(end)
 
@@ -219,7 +206,7 @@ class MelDataset(torch.utils.data.Dataset):
                 end = torch.clip(end, 0.0, 1.0)
 
                 # increment
-                end = end - start_t
+                # end = end - start_t
                 # start_t[1:] = start_t[1:] - start_t[:-1]
 
         if self.train_mode == "S":
@@ -229,7 +216,8 @@ class MelDataset(torch.utils.data.Dataset):
                               dur=dur,
                               begin_time=begin_time,
                               end_time=end_time,
-                              fid=fid)
+                              fid=fid,
+                              length=len(token))
         elif self.train_mode == "T":
             data_point = dict(mel=mel,
                               pitch=token,
@@ -237,7 +225,8 @@ class MelDataset(torch.utils.data.Dataset):
                               end=end,
                               begin_time=begin_time,
                               end_time=end_time,
-                              fid=fid)
+                              fid=fid,
+                              length=len(token))
         else:
             data_point = dict(mel=mel,
                               pitch=token,
@@ -247,13 +236,14 @@ class MelDataset(torch.utils.data.Dataset):
                               end=end,
                               begin_time=begin_time,
                               end_time=end_time,
-                              fid=fid)
+                              fid=fid,
+                              length=len(token))
         return data_point
 
 
     def collate_fn(self, batch):
 
-        pad_dict = {"pitch": PAD_IDX,
+        pad_dict = {"pitch": NUM_CLS,
                     "start": MAX_START+1,
                     "dur": 0,
                     "start_t": 0.0,

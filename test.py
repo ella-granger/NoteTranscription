@@ -42,12 +42,20 @@ def merge_notes(note_list):
 
 
 def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len, tolerance=0.05):
-    pitch = pitch.detach().cpu().numpy()[0]
-    start_t = start_t.detach().cpu().numpy()[0]
-    end = end.detach().cpu().numpy()[0]
-    pitch_p = pitch_p.detach().cpu().numpy()[0]
-    start_t_p = start_t_p.detach().cpu().numpy()[0]
-    end_p = end_p.detach().cpu().numpy()[0]
+    pitch = pitch.detach().cpu().numpy()
+    start_t = start_t.detach().cpu().numpy()
+    end = end.detach().cpu().numpy()
+    pitch_p = pitch_p.detach().cpu().numpy()
+    start_t_p = start_t_p.detach().cpu().numpy()
+    end_p = end_p.detach().cpu().numpy()
+
+    if len(pitch.shape) == 2:
+        pitch = pitch[0]
+        start_t = start_t[0]
+        end = end[0]
+        pitch_p = pitch_p[0]
+        start_t_p = start_t_p[0]
+        end_p = end_p[0]
     
     scaling = HOP_LENGTH / SAMPLE_RATE * seg_len
     p_est = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch_p])
