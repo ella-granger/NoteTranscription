@@ -286,11 +286,12 @@ class MelDataset(torch.utils.data.Dataset):
                     "start": MAX_START+1,
                     "dur": 0,
                     "start_t": 0.0,
-                    "end": 0.0}
+                    "end": 0.0,
+                    "whisper": 0.0}
 
         def pad_and_stack(x_list, pad):
-            max_len = max([len(x) for x in x_list])
-            x_list = [F.pad(x, (0, max_len - len(x)), value=pad) for x in x_list]
+            max_len = max([x.size(-1) for x in x_list])
+            x_list = [F.pad(x, (0, max_len - x.size(-1)), value=pad) for x in x_list]
             return torch.stack(x_list)
 
         result = {}
@@ -301,7 +302,6 @@ class MelDataset(torch.utils.data.Dataset):
                 v = pad_and_stack(v, pad_dict[key])
             result[key] = v
         result["mel"] = torch.stack(result["mel"])
-        result["whisper"] = torch.stack(result["whisper"])
 
         return result
             
