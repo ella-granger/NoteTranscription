@@ -52,8 +52,8 @@ def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len, tol
     scaling = HOP_LENGTH / SAMPLE_RATE * seg_len
     p_est = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch_p])
     p_ref = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch])
-    i_est = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t_p, end_p)]).reshape(-1, 2)
-    i_ref = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t, end)]).reshape(-1, 2)
+    i_est = np.array([(s * scaling, (d) * scaling) for (s, d) in zip(start_t_p, end_p)]).reshape(-1, 2)
+    i_ref = np.array([(s * scaling, (d) * scaling) for (s, d) in zip(start_t, end)]).reshape(-1, 2)
 
     metrics = dict()
     p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None, onset_tolerance=tolerance)
@@ -93,7 +93,7 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
         if p not in trg_dict:
             trg_dict[p] = []
         if e > 0:
-            trg_dict[p].append((s, s+e))
+            trg_dict[p].append((s, e))
         # trg_dict[p].append((s, e))
 
     for p, s, e in zip(pitch_p, start_t_p, end_p):
@@ -102,7 +102,7 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
         if p not in prd_dict:
             prd_dict[p] = []
         if e > 0:
-            prd_dict[p].append((s, s+e))
+            prd_dict[p].append((s, e))
         # prd_dict[p].append((s, e))
 
     print(trg_dict)
@@ -220,7 +220,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
          val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder,
-         scheduled_sampling, prob_model, seg_len, time_lambda):
+         scheduled_sampling, prob_model, seg_len, time_lambda, n_head):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
@@ -242,6 +242,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
+                            n_head=n_head,
                             train_mode=train_mode,
                             seg_len=seg_len,
                             enable_encoder=enable_encoder,
@@ -290,13 +291,13 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             print(fid, begin_time, end_time)
             # _ = input()
 
-            tf = model(mel, x["pitch"].to(device)[:, :-1], None, None,
-                       x["start_t"].to(device)[:, :-1], x["end"].to(device)[:, :-1])
-            tf_p, tf_start, tf_end = tf
-            tf_p = torch.argmax(tf_p, dim=-1)
-            print(tf_p)
-            print(tf_start.reshape(1, -1))
-            print(tf_end.reshape(1, -1))
+            # tf = model(mel, x["pitch"].to(device)[:, :-1], None, None,
+            #            x["start_t"].to(device)[:, :-1], x["end"].to(device)[:, :-1])
+            # tf_p, tf_start, tf_end = tf
+            # tf_p = torch.argmax(tf_p, dim=-1)
+            # print(tf_p)
+            # print(tf_start.reshape(1, -1))
+            # print(tf_end.reshape(1, -1))
             result = model.predict(mel, beam_size=4)
 
             if train_mode == "S":
@@ -354,7 +355,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                     fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
             # else:
             #     break
-            break
+            # break
 
     print(f_c)
     frame_p = f_c[1] / f_c[0]

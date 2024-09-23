@@ -362,7 +362,7 @@ class NoteTransformer(nn.Module):
         enc = enc.repeat((beam_size, 1, 1))
         # print(enc.size())
 
-        MAX_LEN = 800
+        MAX_LEN = 200
         p_start = 0
         pitch = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
         start_t = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
