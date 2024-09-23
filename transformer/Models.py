@@ -93,7 +93,7 @@ class Decoder(nn.Module):
 
     def __init__(
             self, d_word_vec, n_layers, n_head, d_model, d_inner,
-            n_position=800, dropout=0.1, scale_emb=False):
+            n_position=200, dropout=0.1, scale_emb=False):
 
         super().__init__()
 

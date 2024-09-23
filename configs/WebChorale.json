@@ -1,16 +1,18 @@
 {
-    "logdir": "new_opt/l1diou_seg320_layer4",
+    "logdir": "new_dataloader/l1_seg320_layer4_head8",
 
     "n_layers": 4,
-    "prob_model": "l1-diou",
+    "n_head": 8,
+    "prob_model": "l1",
     "seg_len": 320,
 
     "batch_size": 16,
 
-    "learning_rate": 1e-4,
+    "learning_rate": 4e-4,
     "warmup_steps": 12000,
     "clip_gradient_norm": false,
-    "epochs": 2000,
+    "epochs": 20000,
+    
     "time_loss_alpha": 1,
     "enable_encoder": true,
     "scheduled_sampling": false,

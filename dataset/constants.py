@@ -15,7 +15,5 @@ INI_IDX = MRK_IDX
 EOS_IDX = MRK_IDX + 1
 PAD_IDX = MRK_IDX + 2
 
-N_HEAD = 4
-
 MAX_START = round(6.0 / 0.25)
 MAX_DUR = round(12.0 / 0.25)

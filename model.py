@@ -87,7 +87,7 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, n_head, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
@@ -115,7 +115,7 @@ class NoteTransformer(nn.Module):
         if enable_encoder:
             self.encoder = Encoder(d_word_vec=d_model,
                                    n_layers=n_layers,
-                                   n_head=N_HEAD,
+                                   n_head=n_head,
                                    d_model=d_model,
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
@@ -134,7 +134,7 @@ class NoteTransformer(nn.Module):
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
-                               n_head=N_HEAD,
+                               n_head=n_head,
                                d_model=d_model,
                                d_inner=d_inner)
 

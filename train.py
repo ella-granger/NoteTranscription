@@ -76,13 +76,17 @@ def masked_normal_nll(pred, gt, mask, fix_var=None):
     return batch_sum
 
 
-def masked_diou_loss(start_t_p, dur_p, start_t_g, dur_g, mask):
+def masked_diou_loss(start_t_p, dur_p, start_t_g, dur_g, mask, inc=False):
     batch_sum = 0
     for i in range(start_t_p.size(0)):
         l_p = start_t_p[i, :, 0][mask[i]]
-        r_p = l_p + dur_p[i, :, 0][mask[i]]
+        r_p = dur_p[i, :, 0][mask[i]]
+        if inc:
+            r_p += l_p
         l_g = start_t_g[i, :][mask[i]]
-        r_g = l_g + dur_g[i, :][mask[i]]
+        r_g = dur_g[i, :][mask[i]]
+        if inc:
+            r_g += l_g
 
         c = torch.max(r_p, r_g) - torch.min(l_p, l_g)
         inter = torch.min(r_p, r_g) - torch.max(l_p, l_g)
@@ -182,7 +186,7 @@ def config():
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, warmup_steps, mix_k, epsilon,
-          clip_gradient_norm, epochs, data_path,
+          clip_gradient_norm, epochs, data_path, n_head,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, train_mode, enable_encoder,
           scheduled_sampling, prob_model, seg_len, time_lambda):
@@ -217,6 +221,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
+                            n_head=n_head,
                             seg_len=seg_len,
                             train_mode=train_mode,
                             enable_encoder=enable_encoder,
@@ -236,7 +241,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         rectify=True
     )
 
-    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 4e-4, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
+    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, 1000000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
     
     # optimizer = ScheduledOptim(
     #     optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
@@ -261,6 +266,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     torch.autograd.set_detect_anomaly(True)
     for e in range(epochs):
         itr = tqdm(train_loader)
+        train_data.update_shift()
         for x in itr:
             mel = x["mel"].to(device)
             pitch = x["pitch"].to(device)
@@ -365,11 +371,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     start_t_loss = time_loss_alpha * masked_l2_loss(start_t_p, start_t_o, seq_mask)
                     end_loss = time_loss_alpha * masked_l2_loss(end_p, end_o, seq_mask)
                 elif prob_model == "diou":
-                    diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
+                    diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask, inc=False) # diou loss
                 elif prob_model == "l1-diou":
                     start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask))
                     try:
-                        diou_loss = 0.5 * time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask)
+                        diou_loss = 0.5 * time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask, inc=False)
                     except Exception as e:
                         print(x["fid"])
                         print(x["begin_time"])
@@ -490,10 +496,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 start_t_loss = time_loss_alpha * masked_l1_loss(start_t_p, start_t_o, seq_mask)
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
                             elif prob_model == "diou":
-                                diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask) # diou loss
+                                diou_loss = time_loss_alpha * masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask, inc=False) # diou loss
                             elif prob_model == "l1-diou":
                                 start_t_loss = time_loss_alpha * (masked_l1_loss(start_t_p, start_t_o, seq_mask))
-                                diou_loss = time_loss_alpha * 0.5 * (masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask))
+                                diou_loss = time_loss_alpha * 0.5 * (masked_diou_loss(start_t_p, end_p, start_t_o, end_o, seq_mask, inc=False))
                                 end_loss = time_loss_alpha * masked_l1_loss(end_p, end_o, seq_mask)
             
                         loss = pitch_loss + time_lambda * (start_loss + dur_loss + start_t_loss + end_loss + diou_loss)
@@ -549,8 +555,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("t/%d/gt" % i, str(gt_list), step)
                                 sw.add_text("t/%d/pred" % i, str(pred_list), step)
                                 
-                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=True), step)
-                                sw.add_figure("pred/t_%d" % i, plot_midi([x[0] for x in pred_list], [x[1] for x in pred_list], [x[2] for x in pred_list], inc=True), step)
+                                sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_t_o, end_o, inc=False), step)
+                                sw.add_figure("pred/t_%d" % i, plot_midi([x[0] for x in pred_list], [x[1] for x in pred_list], [x[2] for x in pred_list], inc=False), step)
                             # _ = input()
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)
