@@ -85,6 +85,8 @@ class MelDataset(torch.utils.data.Dataset):
         start_t = torch.FloatTensor([x[1] for x in notes])
         end = torch.FloatTensor([x[2] for x in notes])
 
+        end = end - start_t
+
         mel = segment["mel"][:, begin_idx:end_idx]
 
         return dict(mel=mel,
