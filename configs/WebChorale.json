@@ -1,16 +1,16 @@
 {
-    "logdir": "detr/test_empty_0.1_num_q_100_box_0.1_l1_0.1_pitch_2.0_n_head_8_single",
+    "logdir": "detr/empty_0.05_num_q_100_box_0.1_l1_0.1_pitch_2.0_n_head_8_scale_emb_0_full",
 
     "n_layers": 6,
     "n_head": 8,
     "prob_model": "l1-diou",
     "seg_len": 320,
     "num_samples": 100,
-    "empty_weight": 0.1,
+    "empty_weight": 0.05,
 
     "batch_size": 16,
 
-    "learning_rate": 4e-4,
+    "learning_rate": 1e-4,
     "warmup_steps": 12000,
     "clip_gradient_norm": false,
     "epochs": 2000,

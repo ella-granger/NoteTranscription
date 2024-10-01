@@ -75,7 +75,7 @@ class Encoder(nn.Module):
         # enc_output = self.src_word_emb(src_seq)
         enc_output = src_seq
         if self.scale_emb:
-            enc_output *= self.d_model ** 0.5
+            enc_output *= self.d_model ** 0.125
         enc_output = self.dropout(self.position_enc(enc_output))
         enc_output = self.layer_norm(enc_output)
 
@@ -117,7 +117,7 @@ class Decoder(nn.Module):
         # dec_output = self.trg_word_emb(trg_seq)
         dec_output = trg_seq
         if self.scale_emb:
-            dec_output *= self.d_model ** 0.5
+            dec_output *= self.d_model ** 0.125
         # dec_output = self.dropout(self.position_enc(dec_output))
         dec_output = self.dropout(dec_output)
         dec_output = self.layer_norm(dec_output)

@@ -10,7 +10,7 @@ from scipy.stats import hmean
 from collections import defaultdict
 
 
-def decode_notes(pitch, start, end):
+def decode_notes(pitch, start, end, threshold=False):
     if len(pitch.size()) == 3:
         pitch = pitch[0]
         start = start[0]
@@ -23,9 +23,11 @@ def decode_notes(pitch, start, end):
     # print(end.size())
 
     pitch_idx = torch.argmax(pitch, dim=-1)
-    valid = (pitch_idx != NUM_CLS)
-    # pred_p = pitch[np.arange(pitch.size(0)), pitch_idx]
-    # valid = (pred_p > 0.85) * (pitch_idx != NUM_CLS)
+    if threshold:
+        pred_p = pitch[np.arange(pitch.size(0)), pitch_idx]
+        valid = (pred_p > 0.85) * (pitch_idx != NUM_CLS)
+    else:
+        valid = (pitch_idx != NUM_CLS)
 
     pitch_v = pitch_idx[valid]
     start_v = start[valid]

@@ -121,7 +121,7 @@ class NoteTransformer(nn.Module):
                                    d_model=d_model,
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
-                                   scale_emb=True)
+                                   scale_emb=False)
 
         # Decoder
         """
@@ -510,6 +510,10 @@ class DETRLoss(nn.Module):
         # p_p = F.softmax(p_p, dim=-1)
         
         loss = -p_p[:, p_t]
+        if torch.isnan(loss).any():
+            print("Pitch NaN")
+            print(p_p)
+            print(p_t)
         return loss
 
 
@@ -536,6 +540,12 @@ class DETRLoss(nn.Module):
         d = torch.abs((start_p + end_p) / 2 - (start_t + end_t) / 2)
 
         loss = 1 - inter / c + (d/c) ** 2
+        if torch.isnan(loss).any():
+            print("Box NaN")
+            print(start_p)
+            print(end_p)
+            print(start_t)
+            print(end_t)
         return loss
 
 
@@ -558,6 +568,12 @@ class DETRLoss(nn.Module):
         end_loss = torch.abs(end_p - end_t)
 
         loss = start_loss + end_loss
+        if torch.isnan(loss).any():
+            print("L1 NaN")
+            print(start_p)
+            print(end_p)
+            print(start_t)
+            print(end_t)
         return loss
 
 
@@ -608,12 +624,13 @@ class DETRLoss(nn.Module):
             # Add the empty loss
             empty_p = pitch_p[i, :, -1]
             empty_idx = list(set([x for x in range(N)]) - set(row))
-            empty_p = empty_p[empty_idx]
-            # print(empty_p.size())
-            empty_loss =  - torch.sum(empty_p) * self.empty_weight
-            # print(empty_loss.item())
-            empty_loss /= len(empty_idx)
-            loss_i += empty_loss
+            if len(empty_idx) > 0:
+                empty_p = empty_p[empty_idx]
+                # print(empty_p.size())
+                empty_loss =  - torch.sum(empty_p) * self.empty_weight
+                # print(empty_loss.item())
+                empty_loss /= len(empty_idx)
+                loss_i += empty_loss
             # print(empty_loss.item())
             # _ = input()
 

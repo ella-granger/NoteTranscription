@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import json
 from copy import deepcopy
 from dataset.constants import *
+from tqdm import tqdm
 # from constants import *
 
 
@@ -38,7 +39,7 @@ class MelDataset(torch.utils.data.Dataset):
         self.dataset_len = 0
 
         self.fid_list = []
-        for f in mel_files:
+        for f in tqdm(mel_files):
             if f.stem not in id_list:
                 continue
             self.fid_list.append(f.stem)
@@ -61,10 +62,11 @@ class MelDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         index = np.random.randint(len(self.mel_list))
-        index = 0
+        # index = 0
 
         # fid = "rv8B6tMNFJI"
         # fid = "jd2_r4PK5dc"
+        # fid = "rIGMtLin3O8"
         # index = self.fid_list.index(fid)
 
         mel = self.mel_list[index]

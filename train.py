@@ -206,7 +206,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
     valid_data = MelDataset(data_path / "mel",
                             data_path / "note",
-                            data_path / "train.json", # "valid.json",
+                            data_path / "valid.json", # "valid.json",
                             train_mode,
                             seg_len=seg_len,
                             device=device)
@@ -367,6 +367,14 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 loss, losses, _ = loss_cal(pitch_p, start_t_p, end_p, pitch, start_t, end, x["length"])
                 # print([x.item() for x in losses])
                 # print(loss.item())
+
+                if torch.isnan(loss).any():
+                    for k, l in enumerate(losses):
+                        if torch.isnan(l).any():
+                            print(pitch[k])
+                            print(start_t[k])
+                            print(end[k])
+                            exit()
                 
             loss.backward()
             optimizer.step()
@@ -466,7 +474,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             
                         total_loss += loss.item()
                         
-                        note_p, note_s, note_e = decode_notes(pitch_p, start_t_p, end_p)
+                        note_p, note_s, note_e = decode_notes(pitch_p, start_t_p, end_p, threshold=True)
                         # print(note_p.size(), note_s.size(), note_e.size(), pitch.size(), start_t.size(), end.size())
                         try:
                             metrics = cal_mir_metrics(pitch[0], start_t[0], end[0], note_p, note_s, note_e, seg_len)
