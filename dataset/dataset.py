@@ -91,7 +91,8 @@ class MelDataset(torch.utils.data.Dataset):
         index = np.random.randint(len(self.mel_list))
 
         mel = self.mel_list[index]
-        note = self.note_list[index]
+        notes = self.note_list[index]
+        fid = self.fid_list[index]
 
         total_length = self.get_length(mel, note)
 
