@@ -7,16 +7,16 @@ import torch.nn.functional as F
 import json
 from copy import deepcopy
 from dataset.constants import *
+from math import ceil
 # from constants import *
 
 
 class MelDataset(torch.utils.data.Dataset):
-    def __init__(self, mel_dir, note_dir, id_json, train_mode,
+    def __init__(self, mel_dir, note_dir, id_json,
                  seg_len=320, shuffle=True, device="cpu"):
         super().__init__()
 
         self.voice_list = ["S", "A", "T", "B"]
-        self.train_mode = train_mode
         self.seg_len = seg_len
         self.shuffle = shuffle
         self.device = device
@@ -25,11 +25,6 @@ class MelDataset(torch.utils.data.Dataset):
         note_dir = Path(note_dir)
         with open(id_json) as fin:
             id_list = json.load(fin)
-        # id_list = ["oudkfwwrZq0"]
-        # id_list = ["qjtMJxtoooI"]
-        # id_list = ["BC059"]
-        # id_list = ["sRmOnHiXU0o"]
-        # id_list = ["rcNyTVnpVe4"]
         
         mel_files = list(mel_dir.glob("*.pkl"))
 
@@ -44,9 +39,11 @@ class MelDataset(torch.utils.data.Dataset):
             self.fid_list.append(f.stem)
             with open(f, 'rb') as fin:
                 mel = pickle.load(fin)
+            self.mel_list.append(mel)
+            
             with open(note_dir / ("%s.pkl" % f.stem), "rb") as fin:
                 note = pickle.load(fin)
-            self.mel_list.append(mel)
+            note = self.convert_notelist(note)
             self.note_list.append(note)
 
             data_length = self.get_length(mel, note)
@@ -59,19 +56,44 @@ class MelDataset(torch.utils.data.Dataset):
         return self.dataset_len
 
 
+    def convert_notelist(self, note):
+        notes = []
+
+        for bar in note:
+            for part, note_list in bar.items():
+                if part[0] in self.voice_list:
+                    for n in note_list:
+                        new_n = deepcopy(n)
+                        new_n.append(self.voice_list.index(part[0]))
+                        notes.append(tuple(new_n))
+        
+        begin = [] # begin time index. The first note which ENDS AFTER the index second
+        end = [0] * ceil(notes[-1][3]) # end time index. The last note which BEGINS BEFORE the index+1 second
+
+        notes = sorted(notes, key=lambda x:(x[3], -x[0]))
+        for i, n in enumerate(notes):
+            b = n[3]
+            e = n[4]
+
+            while len(begin) < ceil(e):
+                begin.append(i)
+
+            for tmp in range(int(b), len(end)):
+                end[tmp] = i
+
+        while len(end) != len(begin):
+            end.append(end[-1])
+
+        return {"notes": notes, "begin": tuple(begin), "end": tuple(end)}
+        
+
     def __getitem__(self, index):
         index = np.random.randint(len(self.mel_list))
 
-        fid = "rv8B6tMNFJI"
-        index = self.fid_list.index(fid)
-
         mel = self.mel_list[index]
-        notes = self.note_list[index]
-        # fid = self.fid_list[index]
+        note = self.note_list[index]
 
-        # print(mel.size())
-
-        total_length = self.get_length(mel, notes)
+        total_length = self.get_length(mel, note)
 
         if total_length < self.seg_len:
             # pad to seg_len
@@ -79,177 +101,57 @@ class MelDataset(torch.utils.data.Dataset):
         else:
             begin_idx = np.random.randint(total_length - self.seg_len + 1)
             end_idx = begin_idx + self.seg_len
+            mel = mel[:, begin_idx:end_idx]
+
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
 
-            begin_time = 159.344
-            end_time = 164.464
-            begin_idx = int(begin_time * SAMPLE_RATE / HOP_LENGTH)
-            end_idx = int(end_time * SAMPLE_RATE / HOP_LENGTH)
+            begin_tmp = note["begin"][int(begin_time)]
+            end_tmp = note["end"][int(end_time)]
 
-            cur_bar_list = []
-            start_flag = False
-            for bar in notes:
-                note_count = sum([len(v) for k, v in bar.items() if k[0] in self.voice_list])
-                time_min = 1e6
-                time_max = -1
-                # print(note_count, bar)
-                if note_count > 0 or start_flag:
-                    if note_count == 0:
-                        cur_bar_list.append(bar)
-                        continue
-                    for k, v in bar.items():
-                        if k[0] not in self.voice_list:
-                            continue
-                        for note in v:
-                            if note[-1] > time_max:
-                                time_max = note[-1]
-                            if note[-2] < time_min:
-                                time_min = note[-2]
-                    if time_min < end_time and time_max > begin_time:
-                        cur_bar_list.append(bar)
-                        start_flag = True
-                    if time_min > end_time:
-                        break
-            # print(begin_time, end_time)
-            # print(cur_bar_list)
-            token = []
-            if "S" in self.train_mode:
-                start = []
-                dur = []
-            if "T" in self.train_mode:
-                start_t = []
-                end = []
+            notes_tmp = note["notes"][begin_tmp:end_tmp+1]
 
-            for bar in cur_bar_list:
-                full = False
-                sig = bar["measure"]
-                max_time = 0
-                note_list = []
-                for part in self.voice_list:
-                    part_list = []
-                    last_list = []
-                    for k, v in bar.items():
-                        if part in k:
-                            part_list += v
-                            if len(v) > 0:
-                                last_list.append(v[-1])
-                    part_list = sorted(part_list, key=lambda x: (x[3], -x[0]))
-                    # print("--------------------------------")
-                    # print(part)
-                    # print(part_list)
-                    # print(last_list)
+            note_list = []
+            for n in notes_tmp:
+                if n[3] < end_time and n[4] >= begin_time:
+                    new_n = (n[0], max(n[3], begin_time), min(n[4], end_time), n[5])
+                    note_list.append(new_n)
 
-                    last_count = 0
-                    for idx, note in enumerate(part_list):
-                        if note[3] < end_time and note[4] >= begin_time:
-                            new_note = deepcopy(note)
-                            new_note[3] = max(note[3], begin_time)
-                            new_note[4] = min(note[4], end_time)
-                            note_list.append(tuple(new_note))
-                            if note in last_list:
-                                full = True
+            note_list = sorted(note_list, key=lambda x:(x[1], -x[0]))
 
-                # print(note_list)
-                note_list = list(set(note_list))
-                note_list = sorted(note_list, key=lambda x:(x[3], -x[0]))
+            tokens = [x[0] for x in note_list]
+            start_t = [x[1] for x in note_list]
+            end = [x[2] for x in note_list]
 
-                for note in note_list:
-                    token.append(note[0])
-                    if "S" in self.train_mode:
-                        start.append(note[1])
-                        dur.append(note[2])
-                    if "T" in self.train_mode:
-                        start_t.append(note[3])
-                        end.append(note[4])
-                        if note[4] > max_time:
-                            max_time = note[4]
-                if full:
-                    if "S" in self.train_mode:
-                        token.append(0)
-                        start.append(sig)
-                        dur.append(0.0)
-                        if "T" in self.train_mode:
-                            start_t.append(max_time)
-                            end.append(max_time)
-            # print(token)
-            # print(start)
-            # print(dur)
-            
-            mel = mel[:, begin_idx:end_idx]
-            token.insert(0, MAX_MIDI+1)
-            token.append(MAX_MIDI+2)
+            token.insert(0, MAX_MIDI + 1)
+            token.append(MAX_MIDI + 2)
             token = torch.LongTensor(token)
-            token[token>0] = token[token>0] - MIN_MIDI + 1
+            token = token - MIN_MIDI
 
-            if "S" in self.train_mode:
-                start.insert(0, 0.0)
-                dur.insert(0, 0.0)
-                start.append(0.0)
-                dur.append(0.0)
+            start_t.insert(0, begin_time)
+            end.insert(0, begin_time)
+            if len(note_list) == 0:
+                start_t.append(begin_time)
+                end.append(begin_time)
+            else:
+                start_t.append(max(end))
+                end.append(max(end))
 
-                start = np.array(start) / 0.25
-                dur = np.array(dur) / 0.25
+            start_t = torch.FloatTensor(start_t)
+            end = torch.FloatTensor(end)
 
-                start = start.astype(int)
-                dur = dur.astype(int)
-                
-                start = torch.LongTensor(start)
-                dur = torch.LongTensor(dur)
-                dur = torch.clip(dur, 0, MAX_DUR)
-                
-            if "T" in self.train_mode:
-                start_t.insert(0, begin_time)
-                if len(end) == 0:
-                    start_t.append(end_time)
-                else:
-                    start_t.append(max(end))
-                end.insert(0, begin_time)
-                if len(end) == 1:
-                    end.append(end_time)
-                else:
-                    end.append(max(end))
-                start_t = torch.FloatTensor(start_t)
-                end = torch.FloatTensor(end)
+            start_t = (start_t - begin_time) / (end_time - begin_time)
+            end = (end - begin_time) / (end_time - begin_time)
 
-                start_t = (start_t - begin_time) / (end_time - begin_time)
-                end = (end - begin_time) / (end_time - begin_time)
+            end = end - start_t
 
-                start_t = torch.clip(start_t, 0.0, 1.0)
-                end = torch.clip(end, 0.0, 1.0)
-
-                # increment
-                end = end - start_t
-                # start_t[1:] = start_t[1:] - start_t[:-1]
-
-        if self.train_mode == "S":
-            data_point = dict(mel=mel,
-                              pitch=token,
-                              start=start,
-                              dur=dur,
-                              begin_time=begin_time,
-                              end_time=end_time,
-                              fid=fid)
-        elif self.train_mode == "T":
-            data_point = dict(mel=mel,
-                              pitch=token,
-                              start_t=start_t,
-                              end=end,
-                              begin_time=begin_time,
-                              end_time=end_time,
-                              fid=fid)
-        else:
-            data_point = dict(mel=mel,
-                              pitch=token,
-                              start=start,
-                              dur=dur,
-                              start_t=start_t,
-                              end=end,
-                              begin_time=begin_time,
-                              end_time=end_time,
-                              fid=fid)
-        return data_point
-
+        return dict(mel=mel,
+                    pitch=token,
+                    start_t=start_t,
+                    end=end,
+                    begin_time=begin_time,
+                    end_time=end_time,
+                    fid=fid)
 
     def collate_fn(self, batch):
 
@@ -278,20 +180,9 @@ class MelDataset(torch.utils.data.Dataset):
 
     def get_length(self, mel, note):
         mel_length = mel.size(1)
-        note_length = 0
-        for bar in note[::-1]:
-            note_count = sum([len(v) for k, v in bar.items() if k[0] in self.voice_list])
-            # print(bar)
-            # print(note_count)
-            if note_count > 0:
-                for k, v in bar.items():
-                    if k[0] not in self.voice_list:
-                        continue
-                    for note in v:
-                        if note[-1] > note_length:
-                            note_length = note[-1]
-                break
-        # print(note_length)
+
+        last_sec = note["begin"][-1]
+        note_length = max([x[4] for x in note["notes"][last_sec:]])
         note_length = int(note_length * SAMPLE_RATE / HOP_LENGTH)
         # print(mel_length)
         # print(note_length)
@@ -306,7 +197,7 @@ if __name__ == "__main__":
     note_dir = Path("./test/BachChorale/note")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    dataset = MelDataset(mel_dir, note_dir, "./test/BachChorale/test.json", "S", device=device)
+    dataset = MelDataset(mel_dir, note_dir, "./test/BachChorale/test.json", device=device)
 
     from torch.utils.data import DataLoader
     batch_size = 1
