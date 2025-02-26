@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
 from dataset.constants import *
 
 from mir_eval.multipitch import evaluate as evaluate_frames
@@ -10,7 +11,7 @@ from scipy.stats import hmean
 from collections import defaultdict
 
 
-def decode_notes(pitch, start, end, threshold=False):
+def decode_notes(pitch, start, end, threshold=False, getAll=False):
     if len(pitch.size()) == 3:
         pitch = pitch[0]
         start = start[0]
@@ -22,22 +23,31 @@ def decode_notes(pitch, start, end, threshold=False):
     # print(start.size())
     # print(end.size())
 
+    pitch = F.softmax(pitch, dim=1)
+    # print(pitch[:10, -10:])
+    # print(pitch.min(), pitch.max(), pitch.size())
+    # _ = input()
+
     pitch_idx = torch.argmax(pitch, dim=-1)
+    pred_p = pitch[np.arange(pitch.size(0)), pitch_idx]
+    # print(pred_p)
     if threshold:
-        pred_p = pitch[np.arange(pitch.size(0)), pitch_idx]
         valid = (pred_p > 0.85) * (pitch_idx != NUM_CLS)
-    else:
+    elif not getAll:
         valid = (pitch_idx != NUM_CLS)
+    else:
+        valid = (pitch_idx == pitch_idx)
 
     pitch_v = pitch_idx[valid]
     start_v = start[valid]
     end_v = end[valid]
+    prob_v = pred_p[valid]
 
     # print(pitch_v.size())
     # print(start_v.size())
     # print(end_v.size())
     # _ = input()
-    return pitch_v, start_v, end_v
+    return pitch_v, start_v, end_v, prob_v
 
 
 def plot_mat(mat, row, col):

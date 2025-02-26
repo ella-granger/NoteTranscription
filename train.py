@@ -244,7 +244,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         rectify=True
     )
 
-    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
+    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, 1000000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
     
     # optimizer = ScheduledOptim(
     #     optim.Adam(model.parameters(), betas=(0.9, 0.98), eps=1e-09),
@@ -263,8 +263,28 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         max_note_f1 = ckpt_dict["max_note_f1"]
         # optimizer._optimizer.load_state_dict(ckpt_dict["optim"])
         # optimizer.n_steps = step
-        optimizer.load_state_dict(ckpt_dict["optim"])
-        lrScheduler.load_state_dict(ckpt_dict["scheduler"])
+        optimizer_ckpt = ckpt_dict["optim"]
+        for k in optimizer_ckpt:
+            print(k)
+        # for k in optimizer_ckpt["state"]:
+        #     print(k)
+        # for k, v in optimizer_ckpt["state"].items():
+        #     print(v.keys())
+        # print(optimizer_ckpt["state"][0])
+        # print(optimizer_ckpt["state"])
+        # print(type(optimizer_ckpt["state"]))
+        # _ = input()
+        for d in optimizer_ckpt["param_groups"]:
+            d["max_lr"] = learning_rate
+        print(optimizer_ckpt["param_groups"])
+        optimizer.load_state_dict(optimizer_ckpt)
+        print()
+        scheduler_ckpt = ckpt_dict["scheduler"]
+        scheduler_ckpt["total_steps"] = 2000000
+        scheduler_ckpt["_schedule_phases"][1]["end_step"] = 1999999
+        lrScheduler.load_state_dict(scheduler_ckpt)
+        print(ckpt_dict["scheduler"])
+        _ = input()
 
         print(str(ckpt_path), "loaded.")
     
@@ -474,7 +494,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             
                         total_loss += loss.item()
                         
-                        note_p, note_s, note_e = decode_notes(pitch_p, start_t_p, end_p, threshold=True)
+                        note_p, note_s, note_e, _ = decode_notes(pitch_p, start_t_p, end_p, threshold=True)
                         # print(note_p.size(), note_s.size(), note_e.size(), pitch.size(), start_t.size(), end.size())
                         try:
                             metrics = cal_mir_metrics(pitch[0], start_t[0], end[0], note_p, note_s, note_e, seg_len)

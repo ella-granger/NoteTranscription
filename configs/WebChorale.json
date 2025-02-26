@@ -1,12 +1,12 @@
 {
-    "logdir": "detr/empty_0.05_num_q_100_box_0.1_l1_0.1_pitch_2.0_n_head_8_scale_emb_0_full",
+    "logdir": "detr/empty_0.1_num_q_100_box_0.1_l1_0.1_pitch_2.0_n_head_8_scale_emb_0_full_batch_16_lr_1",
 
     "n_layers": 6,
     "n_head": 8,
     "prob_model": "l1-diou",
     "seg_len": 320,
     "num_samples": 100,
-    "empty_weight": 0.05,
+    "empty_weight": 0.1,
 
     "batch_size": 16,
 
