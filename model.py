@@ -87,7 +87,7 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, train_mode, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
@@ -123,14 +123,8 @@ class NoteTransformer(nn.Module):
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model // 2, padding_idx=PAD_IDX)
-        if "S" in train_mode:
-            self.trg_start_emb = nn.Embedding(MAX_START+2, d_model // 4 // len(train_mode), padding_idx=MAX_START+1)
-            self.trg_dur_emb = nn.Embedding(MAX_DUR+1, d_model // 4 // len(train_mode), padding_idx=0)
-        if "T" in train_mode:
-            self.start_prj = TimeEncoding(d_model // 4 // len(train_mode), d_model, seg_len)
-            self.end_prj = TimeEncoding(d_model // 4 // len(train_mode), d_model, seg_len)
-            # self.start_prj = nn.Linear(1, d_model // 4 // len(train_mode))
-            # self.end_prj = nn.Linear(1, d_model // 4 // len(train_mode))
+        self.start_prj = TimeEncoding(d_model // 4, d_model, seg_len)
+        self.dur_prj = TimeEncoding(d_model // 4, d_model, seg_len)
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
@@ -142,30 +136,23 @@ class NoteTransformer(nn.Module):
         # self.trg_pitch_prj = nn.Linear(d_model, PAD_IDX+1)
         self.trg_pitch_prj = MLP(d_model, [d_model, d_model, PAD_IDX+1])
         # self.trg_start_prj = nn.Linear(d_model // 8, 1)
-        # self.trg_end_prj = nn.Linear(d_model // 8, 1)
+        # self.trg_dur_prj = nn.Linear(d_model // 8, 1)
         # self.trg_pitch_prj = nn.Linear(d_model * 3 // 4, PAD_IDX+1)
-        if "S" in train_mode:
-            # self.trg_start_s_prj = nn.Linear(d_model // 8 // len(train_mode), MAX_START+2)
-            # self.trg_dur_s_prj = nn.Linear(d_model // 8 // len(train_mode), MAX_DUR+1)
-            self.trg_start_s_prj = nn.Linear(d_model, MAX_START+2)
-            self.trg_dur_s_prj = nn.Linear(d_model, MAX_DUR+1)
-        if "T" in train_mode:
-            if prob_model in ["gaussian", "beta"]:
-                # self.trg_start_t_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
-                # self.trg_end_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
-                self.trg_start_t_prj = nn.Linear(d_model, 2)
-                self.trg_end_prj = nn.Linear(d_model, 2)
-            elif prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
-                # self.trg_start_t_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
-                # self.trg_end_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
-                self.trg_start_t_prj = MLP(d_model, [d_model, d_model, 1])
-                self.trg_end_prj = MLP(d_model, [d_model, d_model, 1])
-                # self.trg_start_t_prj = nn.Linear(d_model, 1)
-                # self.trg_end_prj = nn.Linear(d_model, 1)
+        if prob_model in ["gaussian", "beta"]:
+            # self.trg_start_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
+            # self.trg_dur_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
+            self.trg_start_prj = nn.Linear(d_model, 2)
+            self.trg_dur_prj = nn.Linear(d_model, 2)
+        elif prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
+            # self.trg_start_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
+            # self.trg_dur_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
+            self.trg_start_prj = MLP(d_model, [d_model, d_model, 1])
+            self.trg_dur_prj = MLP(d_model, [d_model, d_model, 1])
+            # self.trg_start_prj = nn.Linear(d_model, 1)
+            # self.trg_dur_prj = nn.Linear(d_model, 1)
 
-        self.train_mode = train_mode
 
-    def forward(self, mel, pitch, start_s, dur, start_t, end, return_attns=False, return_cnn=False):
+    def forward(self, mel, pitch, start, dur, return_attns=False, return_cnn=False):
         return_attns = return_attns & self.enable_encoder
         # mel feature extraction
         mel = self.cnn(mel)
@@ -186,32 +173,16 @@ class NoteTransformer(nn.Module):
         # decoding
         trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
 
-        if "T" in self.train_mode:
-            start_t = torch.unsqueeze(start_t, -1)
-            end = torch.unsqueeze(end, -1)
-            start_t = self.start_prj(start_t)
-            end = self.end_prj(end)
-            # start = self.time_enc(start)
-            # end = self.time_enc(end)
+        start = torch.unsqueeze(start, -1)
+        dur = torch.unsqueeze(dur, -1)
+        start = self.start_prj(start)
+        dur = self.dur_prj(dur)
         pitch = self.trg_pitch_emb(pitch)
-        if "S" in self.train_mode:
-            start_s = self.trg_start_emb(start_s)
-            dur = self.trg_dur_emb(dur)
 
-        if self.train_mode == "T":
-            # print(pitch.size())
-            # print(start_t.size())
-            # print(end.size())
-            trg_seq = torch.cat([pitch, start_t, end], dim=-1)
-        elif self.train_mode == "S":
-            trg_seq = torch.cat([pitch, start_s, dur], dim=-1)
-        else:
-            # print(pitch.size())
-            # print(start_t.size())
-            # print(end.size())
-            # print(start_s.size())
-            # print(dur.size())
-            trg_seq = torch.cat([pitch, start_t, end, start_s, dur], dim=-1)
+        # print(pitch.size())
+        # print(start.size())
+        # print(dur.size())
+        trg_seq = torch.cat([pitch, start, dur], dim=-1)
 
         if return_attns:
             dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, mel, return_attns=True)
@@ -221,35 +192,25 @@ class NoteTransformer(nn.Module):
         # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
         pitch_out = self.trg_pitch_prj(dec)
 
-        if "S" in self.train_mode:
-            #################################BUG!!!!!!!!!!!!!!!!!!!!!!!!
-            start_s_out = self.trg_start_s_prj(dec)
-            dur_out = self.trg_dur_s_prj(dec)
-        if "T" in self.train_mode:
-            # start_t_out = self.trg_start_t_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-            # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
-            start_t_out = self.trg_start_t_prj(dec)
-            end_out = self.trg_end_prj(dec)
-            
-            start_t_out = F.sigmoid(start_t_out)
-            end_out = F.sigmoid(end_out)
-            # start_t_out = F.elu(start_t_out) + 2
-            # end_out = F.elu(end_out) + 2
+        # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
+        # dur_out = self.trg_dur_prj(dec[:, :, (-self.d_model // 8):])
+        start_out = self.trg_start_prj(dec)
+        dur_out = self.trg_dur_prj(dec)
+        
+        start_out = F.sigmoid(start_out)
+        dur_out = F.sigmoid(dur_out)
+        # start_out = F.elu(start_out) + 2
+        # dur_out = F.elu(dur_out) + 2
         
         # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
         # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
         # start_out = F.sigmoid(start_out)
-        # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
-        # end_out = F.sigmoid(end_out)
+        # dur_out = self.trg_dur_prj(dec[:, :, (-self.d_model // 8):])
+        # dur_out = F.sigmoid(dur_out)
 
-        if self.train_mode == "T":
-            result = (pitch_out, start_t_out, end_out)
-        elif self.train_mode == "S":
-            result = (pitch_out, start_s_out, dur_out)
-        else:
-            result = (pitch_out, start_t_out, end_out, start_s_out, dur_out)
+        result = (pitch_out, start_out, dur_out)
         
-        # return pitch_out, start_out, end_out
+        # return pitch_out, start_out, dur_out
         if return_attns:
             return result, (enc_attn, dec_self_attn, dec_enc_attn)
         else:
@@ -286,73 +247,6 @@ class NoteTransformer(nn.Module):
         return e
 
 
-    def forward_mix(self, mel, t,
-                    pitch_p, start_p, dur_p, start_t_p, end_p,
-                    pitch_i, start_i, dur_i, start_t_i, end_i):
-        mel = self.cnn(mel)
-        mel = torch.permute(mel, (0, 2, 1))
-
-        if self.enable_encoder:
-            mel, *_ = self.encoder(mel)
-
-        trg_mask = get_pad_mask(pitch_i, PAD_IDX) & get_subsequent_mask(pitch_i)
-
-        mix_mask = get_mix_mask(pitch_i, t)
-
-        # pitch = self.get_mix_emb(pitch_p, pitch_i, self.trg_pitch_emb)
-        pitch = torch.argmax(pitch_p, dim=-1)
-        pitch_i[mix_mask] = pitch[mix_mask]
-        pitch_i = self.trg_pitch_emb(pitch_i)
-        # print(pitch_i.size())
-        # print(pitch.size())
-        # print(mix_mask.size())
-        # pitch_i[mix_mask] = pitch[mix_mask]
-        if "S" in self.train_mode:
-            start = self.get_mix_emb(start_p, start_i, self.trg_start_emb)
-            dur = self.get_mix_emb(dur_p, dur_i, self.trg_dur_emb)
-            start_i = self.trg_start_emb(start_i)
-            dur_i = self.trg_dur_emb(dur_i)
-            start_i[mix_mask] = start[mix_mask]
-            dur_i[mix_mask] = dur[mix_mask]
-        if "T" in self.train_mode:
-            # print(start_t_i.size())
-            # print(start_t_p.size())
-            # print(mix_mask.size())
-            start_t_i = torch.unsqueeze(start_t_i, -1)
-            end_i = torch.unsqueeze(end_i, -1)
-            start_t_i[mix_mask] = start_t_p[mix_mask]
-            end_i[mix_mask] = end_p[mix_mask]
-            start_t_i = self.start_prj(start_t_i)
-            end_i = self.end_prj(end_i)
-
-        if self.train_mode == "T":
-            trg_seq = torch.cat([pitch_i, start_t_i, end_i], dim=-1)
-        elif self.train_mode == "S":
-            trg_seq = torch.cat([pitch_i, start_i, dur_i], dim=-1)
-        else:
-            trg_seq = torch.cat([pitch_i, start_t_i, end_i, start_i, dur_i], dim=-1)
-        
-        dec, *_ = self.decoder(trg_seq, trg_mask, mel)
-
-        pitch_out = self.trg_pitch_prj(dec)
-
-        if "S" in self.train_mode:
-            start_s_out = self.trg_start_s_prj(dec)
-            dur_out = self.trg_dur_s_prj(dec)
-        if "T" in self.train_mode:
-            start_t_out = self.trg_start_t_prj(dec)
-            start_t_out = F.sigmoid(start_t_out)
-            end_out = self.trg_end_prj(dec)
-            end_out = F.sigmoid(end_out)
-
-        if self.train_mode == "T":
-            return pitch_out, start_t_out, end_out
-        elif self.train_mode == "S":
-            return pitch_out, start_s_out, dur_out
-        else:
-            return pitch_out, start_t_out, end_out, start_s_out, dur_out           
-
-
     def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, beam_size=2):
         device = mel.device
         mel = self.cnn(mel)
@@ -362,20 +256,18 @@ class NoteTransformer(nn.Module):
         enc = enc.repeat((beam_size, 1, 1))
         # print(enc.size())
 
-        MAX_LEN = 800
+        MAX_LEN = 200
         p_start = 0
         pitch = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
-        start_t = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
-        end = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
-        start = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
-        dur = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
+        start = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
+        dur = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
         mask = torch.zeros((beam_size, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
         if prev_pitch is not None:
             for b in range(beam_size):
                 pitch[b, 1:len(prev_pitch)+1] = prev_pitch
-                start_t[b, 1:len(prev_pitch)+1, 0] = prev_start
-                end[b, 1:len(prev_pitch)+1, 0] = prev_dur
+                start[b, 1:len(prev_pitch)+1, 0] = prev_start
+                dur[b, 1:len(prev_pitch)+1, 0] = prev_dur
                 mask[b, :, :len(prev_pitch)+1] = True
             p_start = len(prev_pitch)
 
@@ -388,57 +280,27 @@ class NoteTransformer(nn.Module):
             # _ = input()
 
             pitch_emb = self.trg_pitch_emb(pitch)
-            if "T" in self.train_mode:
-                start_t_emb = self.start_prj(start_t)
-                end_emb = self.end_prj(end)
-            if "S" in self.train_mode:
-                start_emb = self.trg_start_emb(start)
-                dur_emb = self.trg_dur_emb(dur)
+            start_emb = self.start_prj(start)
+            dur_emb = self.dur_prj(dur)
 
-            if self.train_mode == "T":
-                trg_seq = torch.cat([pitch_emb, start_t_emb, end_emb], dim=-1)
-            elif self.train_mode == "S":
-                trg_seq = torch.cat([pitch_emb, start_emb, dur_emb], dim=-1)
-            else:
-                trg_seq = torch.cat([pitch_emb, start_t_emb, end_emb, start_emb, dur_emb], dim=-1)
+            trg_seq = torch.cat([pitch_emb, start_emb, dur_emb], dim=-1)
 
             # print(trg_seq.size())
             dec, *_ = self.decoder(trg_seq[:, :(i+1), :], mask[:, :, :(i+1)], enc)
 
             pitch_out = self.trg_pitch_prj(dec)
-            # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
-            if "S" in self.train_mode:
-                start_out = self.trg_start_s_prj(dec)
-                dur_out = self.trg_dur_s_prj(dec)
-            if "T" in self.train_mode:
-                start_t_out = self.trg_start_t_prj(dec)
-                end_out = self.trg_end_prj(dec)
-                # start_t_out = self.trg_start_t_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-                # end_out = self.trg_end_prj(dec[:, :, (-self.d_model // 8):])
-                start_t_out = F.sigmoid(start_t_out)
-                end_out = F.sigmoid(end_out)
-
-            # print(pitch_out[:, i, :])
-            # print(pitch_out.shape)
+            start_out = self.trg_start_prj(dec)
+            dur_out = self.trg_dur_prj(dec)
+            start_out = F.sigmoid(start_out)
+            dur_out = F.sigmoid(dur_out)
 
             # Beam Search
             pitch_p = F.softmax(pitch_out, dim=-1)
-            # print(pitch_p[:, i, :])
-            # print(pitch_p.shape)
-            # _ = input()
             if i == 0:
                 best_k2_probs, best_k2_idx = pitch_p[0:1, i, :].topk(beam_size)
-                # print(best_k2_probs)
-                # print(best_k2_idx)
             else:
                 best_k2_probs, best_k2_idx = pitch_p[:, i, :].topk(beam_size)
-            # print(torch.log(best_k2_probs))
-            # print(best_k2_idx)
-            # print(start_t_out[:, :i+1, 0])
-            # print(end_out[:, :i+1, 0])
             scores = torch.log(best_k2_probs).view(beam_size, -1) + scores.view(beam_size, 1)
-            # if i == 0:
-            # print(scores)
 
             scores, best_k_idx_in_k2 = scores.view(-1).topk(beam_size)
             # print(scores)
@@ -466,29 +328,14 @@ class NoteTransformer(nn.Module):
             # if pitch_pred.item() == EOS_IDX:
             #     break
             # pitch[:, i+1] = pitch_pred
-            
-            if "S" in self.train_mode:
-                # print(start_out.size())
-                start_pred = torch.argmax(start_out[:, i, :], dim=-1)
-                # print(start_pred.size())
-                dur_pred = torch.argmax(dur_out[:, i, :], dim=-1)
-
-            if "S" in self.train_mode:
-                # TODO: rename all the parameters
-                start[:, :i+1] = start[best_k_r_idxs, :i+1]
-                # print(start_pred.size())
-                # _ = input()
-                start[:, i+1] = start_pred[:]
-                dur[:, :i+1] = dur[best_k_r_idxs, :i+1]
-                dur[:, i+1] = dur_pred[:]
             if "T" in self.train_mode:
-                start_t[:, :i+1] = start_t[best_k_r_idxs, :i+1]
-                start_t[:, i+1, 0] = start_t_out[best_k_r_idxs, i, 0]
-                end[:, :i+1] = end[best_k_r_idxs, :i+1]
-                end[:, i+1, 0] = end_out[best_k_r_idxs, i, 0]
+                start[:, :i+1] = start[best_k_r_idxs, :i+1]
+                start[:, i+1, 0] = start_out[best_k_r_idxs, i, 0]
+                dur[:, :i+1] = dur[best_k_r_idxs, :i+1]
+                dur[:, i+1, 0] = dur_out[best_k_r_idxs, i, 0]
             # print(pitch[:, :i+2])
-            # print(start_t[:, :i+2, 0])
-            # print(end[:, :i+2, 0])
+            # print(start[:, :i+2, 0])
+            # print(dur[:, :i+2, 0])
             # _ = input()
 
         # print(pitch)
@@ -497,19 +344,10 @@ class NoteTransformer(nn.Module):
         # print(ans_len)
         # _ = input()
         pitch = pitch[ans_idx:ans_idx+1, 1:ans_len-1]
-        if "S" in self.train_mode:
-            start = start[ans_idx:ans_idx+1, 1:ans_len-1]
-            dur = dur[ans_idx:ans_idx+1, 1:ans_len-1]
-        if "T" in self.train_mode:
-            start_t = start_t[ans_idx:ans_idx+1, 1:ans_len-1, 0]
-            end = end[ans_idx:ans_idx+1, 1:ans_len-1, 0]
+        start = start[ans_idx:ans_idx+1, 1:ans_len-1, 0]
+        dur = dur[ans_idx:ans_idx+1, 1:ans_len-1, 0]
 
-        if self.train_mode == "T":
-            return pitch, start_t, end
-        elif self.train_mode == "S":
-            return pitch, start, dur
-        else:
-            return pitch, start_t, end, start, dur
+        return pitch, start, dur
         
 
 
