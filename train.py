@@ -239,8 +239,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     time_loss = get_time_loss(prob_model)
     
     model.train()
-    torch.autograd.set_detect_anomaly(True)
-    epochs = 3
+    # torch.autograd.set_detect_anomaly(True)
+    # epochs = 3
     for e in range(epochs):
         # itr = tqdm(train_loader)
         for x in tqdm(train_loader):
