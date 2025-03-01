@@ -413,8 +413,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
                 if total_T / total_C > max_pitch_prec:
                 # if eval_pitch_loss < min_pitch_loss:
-                    # max_pitch_prec = total_T / total_C
-                    min_pitch_loss = eval_pitch_loss
+                    max_pitch_prec = total_T / total_C
+                    # min_pitch_loss = eval_pitch_loss
                     save_path = checkpoint_path / "best"
                     torch.save(obj, str(save_path))
 
