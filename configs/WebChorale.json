@@ -1,19 +1,21 @@
 {
-    "logdir": "rewrite/l1diou_seg320_layer4",
+    "logdir": "voices/BnNoWD_SS_l1diou_seg320_layer6",
 
-    "n_layers": 4,
+    "n_layers": 6,
     "prob_model": "l1-diou",
     "seg_len": 320,
 
     "batch_size": 32,
 
-    "learning_rate": 1e-4,
+    "learning_rate": 4e-4,
     "warmup_steps": 12000,
     "clip_gradient_norm": false,
     "epochs": 2000,
     "time_loss_alpha": 1,
     "enable_encoder": true,
-    "scheduled_sampling": false,
+    "scheduled_sampling": true,
+    "scheduled_sampling_step": 200000,
+    "ss_epsilon": 0.75,
 
     "data_path": "./dataset/YouChorale"
 }

@@ -5,7 +5,6 @@ from sacred.observers import FileStorageObserver
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torch import optim
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.distributions.normal import Normal
@@ -16,7 +15,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
 from dataset.dataset import MelDataset
-from model import NoteTransformer
+from model import NoteTransformer, get_trg_mask
 from transformer.Optim import ScheduledOptim
 from tqdm import tqdm
 from dataset.constants import *
@@ -90,6 +89,7 @@ def masked_l2_loss(pred, gt, mask):
     loss = torch.sum(diff[mask.unsqueeze(-1)] ** 2)
     return loss
 
+
 def masked_l1_loss(pred, gt, mask):
     diff = pred - gt.unsqueeze(-1)
     loss = torch.sum(torch.abs(diff[mask.unsqueeze(-1)]))
@@ -113,12 +113,21 @@ def get_time_loss(prob_model):
         return masked_l1_loss
 
 
-def get_mix_t(step, k, epsilon):
+def masked_bce_loss(pred, gt, mask):
+    batch_sum = 0
+    for i in range(gt.size(0)):
+        p = pred[i][mask[i]]
+        g = gt[i][mask[i]]
+        batch_sum += F.binary_cross_entropy(p, g, reduce="sum")
+    return batch_sum
+
+
+def get_mix_t(step, k, epsilon, begin_step):
     # return 1
-    if step < 100000:
+    if step < begin_step:
         t = 1
     else:
-        t = max(epsilon, 1 - k * (step - 100000))
+        t = max(epsilon, 1 - k * (step - begin_step))
     return t
 
 
@@ -129,8 +138,10 @@ def getOptimizerGroup(model, weight_decay):
     noDecay = []
     for name, module in model.named_modules():
         if isinstance(module, nn.GroupNorm) \
-                or isinstance(module, nn.LayerNorm) \
-                or isinstance(module, nn.Embedding):
+           or isinstance(module, nn.LayerNorm) \
+           or isinstance(module, nn.Embedding) \
+           or isinstance(module, nn.BatchNorm1d) \
+           or isinstance(module, nn.BatchNorm2d):
             noDecay.extend(list(module.parameters()))
         else:
             noDecay.extend([p for n, p in module.named_parameters() if "bias" in n])
@@ -164,14 +175,15 @@ def config():
     time_lambda = 3
     enable_encoder = True
     scheduled_sampling = False
+    self_critical = False
 
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
-          learning_rate, warmup_steps, mix_k, epsilon,
-          clip_gradient_norm, epochs, data_path,
+          learning_rate, warmup_steps, mix_k, ss_epsilon,
+          clip_gradient_norm, epochs, data_path, self_critical,
           output_interval, summary_interval, val_interval,
-          loss_norm, time_loss_alpha, enable_encoder,
+          loss_norm, time_loss_alpha, enable_encoder, scheduled_sampling_step,
           scheduled_sampling, prob_model, seg_len, time_lambda):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
@@ -194,7 +206,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             device=device)
 
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=False,
-                              collate_fn=train_data.collate_fn, num_workers=8,
+                              collate_fn=train_data.collate_fn, num_workers=16,
                               persistent_workers=True, prefetch_factor=4, pin_memory=True)
     eval_loader = DataLoader(valid_data, 1, shuffle=False, drop_last=False,
                              collate_fn=valid_data.collate_fn, num_workers=8, pin_memory=True)
@@ -221,7 +233,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         rectify=True
     )
 
-    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 4e-4, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
+    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
 
     step = 0
     max_pitch_prec = 0
@@ -239,26 +251,44 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     time_loss = get_time_loss(prob_model)
     
     model.train()
-    # torch.autograd.set_detect_anomaly(True)
-    # epochs = 3
     for e in range(epochs):
-        # itr = tqdm(train_loader)
-        for x in tqdm(train_loader):
+        itr = tqdm(train_loader)
+        for x in itr:
             mel = x["mel"].to(device)
             pitch = x["pitch"].to(device)
+            voice = x["voice"].to(device)
             start = x["start"].to(device)
             dur = x["dur"].to(device)
 
             pitch_i, pitch_o = patch_trg(pitch)
+            voice_i, voice_o = patch_trg(voice)
             start_i, start_o = patch_trg(start)
             dur_i, dur_o = patch_trg(dur)
 
             optimizer.zero_grad()
-            result = model(mel, pitch_i, start_i, dur_i)
-            pitch_p, start_p, dur_p = result
+            if self_critical:
+                
+            if not scheduled_sampling or step < scheduled_sampling_step:
+                result = model(mel, pitch_i, start_i, dur_i, voice_i)
+            else:
+                mel = model.encode(mel)
+                with torch.no_grad():
+                    trg_mask = get_trg_mask(pitch_i)
+                    trg_seq = model.get_trg_emb(pitch_i, start_i, dur_i, voice_i)
+                    result = model.decode(mel, trg_seq, trg_mask)
+
+                t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
+                trg_mask = get_trg_mask(pitch_i)
+                ref = (pitch_i, start_i, dur_i, voice_i)
+
+                trg_seq = model.get_mix_trg(result, ref, t)
+                result = model.decode(mel, trg_seq, trg_mask)
+                
+            pitch_p, start_p, dur_p, voice_p = result
           
             pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
             seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
+            voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
             start_loss = time_loss(start_p, start_o, seq_mask)
             dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
@@ -266,24 +296,28 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             if "diou" in prob_model:
                 diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
 
-            loss = pitch_loss + time_lambda * (start_loss + dur_loss + diou_loss)
+            loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
 
             loss.backward()
             optimizer.step()
             lrScheduler.step()
 
-            # if step % output_interval == 0:
-            #     itr.set_description("pitch: %.2f" % (pitch_loss.item()))
+            if step % output_interval == 0:
+                itr.set_description("pitch: %.2f" % (pitch_loss.item()))
 
             if step % summary_interval == 0:
                 sw.add_scalar("training/loss", loss.item(), step)
                 sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
+                sw.add_scalar("training/voice_loss", voice_loss.item(), step)
                 if "diou" in prob_model:
                     sw.add_scalar("training/diou_loss", diou_loss.item(), step)
                 if "f1" in prob_model:
                     sw.add_scalar("training/start_loss", start_loss.item(), step)
                     sw.add_scalar("training/dur_loss", dur_loss.item(), step)
                 sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
+                if scheduled_sampling:
+                    t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
+                    sw.add_scalar("training/scheduled_sampling_t", t, step)
 
             if step % val_interval == 0:
                 model.eval()
@@ -293,14 +327,18 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_start_loss = 0
                     total_dur_loss = 0
                     total_diou_loss = 0
+                    total_voice_loss = 0
                     total_T = 0
+                    total_voice_T = 0
                     total_start_T = 0
                     total_dur_T = 0
                     total_C = 0
+                    total_voice_C = 0
                     total_count = 0
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
                         pitch = batch["pitch"].to(device)
+                        voice = batch["voice"].to(device)
                         start = batch["start"].to(device)
                         dur = batch["dur"].to(device)
                         
@@ -309,27 +347,29 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         end_time = batch["end_time"][0]
 
                         pitch_i, pitch_o = patch_trg(pitch)
+                        voice_i, voice_o = patch_trg(voice)
                         start_i, start_o = patch_trg(start)
                         dur_i, dur_o = patch_trg(dur)
 
-                        # result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, start_t_i, end_i, return_attns=True)
-                        result = model(mel, pitch_i, start_i, dur_i, return_cnn=True)
+                        result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True, return_attns=True)
+                        # result = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True)
                         mel_result = model.mel_result
                         enc_result = model.enc_result
-                        pitch_p, start_p, dur_p = result
+                        pitch_p, start_p, dur_p, voice_p = result
 
                         start_loss = 0
                         dur_loss = 0
                         diou_loss = 0
                         pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                         seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
+                        voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
                         start_loss = time_loss(start_p, start_o, seq_mask)
                         dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
                         if "diou" in prob_model:
                             diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
 
-                        loss = pitch_loss + time_lambda * (start_loss + dur_loss + diou_loss)
+                        loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
 
                         if i < 1:
                             b = begin_time
@@ -354,30 +394,30 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             sw.add_figure("enc_%d" % i, plot_spec(enc_result[0].detach().cpu()), step)
 
 
-                            # for a_i, attn in enumerate(enc_attn):
-                            #     sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            # for a_i, attn in enumerate(dec_self_attn):
-                            #     sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            # for a_i, attn in enumerate(dec_enc_attn):
-                            #     sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            pred_list = get_list_t(pitch_p, start_p, dur_p, mode=prob_model)
-                            gt_list = get_list_t(pitch_o, start_o, dur_o, mode=prob_model)
-
-                            pred_list = [(n, s, e) for n, s, e in zip(*pred_list)]
-                            gt_list = [(n, s, e) for n, s, e in zip(*gt_list)]
+                            for a_i, attn in enumerate(enc_attn):
+                                sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(dec_self_attn):
+                                sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            for a_i, attn in enumerate(dec_enc_attn):
+                                sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
+                            pred_list = get_list_t(pitch_p, start_p, dur_p, voice_p, mode=prob_model)
+                            gt_list = get_list_t(pitch_o, start_o, dur_o, voice_o, mode=prob_model)
 
                             sw.add_text("t/%d/gt" % i, str(gt_list), step)
                             sw.add_text("t/%d/pred" % i, str(pred_list), step)
 
-                            sw.add_figure("gt/t_%d" % i, plot_midi(pitch_o, start_o, dur_o, inc=True), step)
-                            sw.add_figure("pred/t_%d" % i, plot_midi([x[0] for x in pred_list], [x[1] for x in pred_list], [x[2] for x in pred_list], inc=True), step)
-                            # _ = input()
+                            sw.add_figure("pred/t_%d" % i, plot_midi(pred_list), step)
+                            sw.add_figure("gt/t_%d" % i, plot_midi(gt_list), step)
 
                         pitch_pred = torch.argmax(pitch_p, dim=-1)
                         total_T += torch.sum(pitch_pred == pitch_o).item()
                         total_C += pitch_pred.size(1)
+                        voice_pred = (voice_p > 0.5)
+                        total_voice_T += torch.sum(voice_pred == voice_o).item()
+                        total_voice_C += torch.sum(voice_o).item()
                         total_loss += loss.item()
                         total_pitch_loss += pitch_loss.item()
+                        total_voice_loss += voice_loss.item()
                         if "l1" in prob_model:
                             total_start_loss += start_loss.item()
                             total_dur_loss += dur_loss.item()
@@ -387,8 +427,10 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
                 eval_loss = total_loss / total_count
                 eval_pitch_loss = total_pitch_loss / total_count
+                eval_voice_loss = total_voice_loss / total_count
                 sw.add_scalar("eval/loss", eval_loss, step)
                 sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
+                sw.add_scalar("eval/voice_loss", eval_voice_loss, step)
                 if "diou" in prob_model:
                     eval_diou_loss = total_diou_loss / total_count
                     sw.add_scalar("eval/diou_loss", eval_diou_loss, step)
@@ -398,6 +440,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("eval/start_loss", eval_start_loss, step)
                     sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
                 sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
+                sw.add_scalar("eval/voice_prec", total_voice_T / total_voice_C, step)
                 print(eval_loss, total_T / total_C)
 
                 checkpoint_path = logdir / "ckpt"

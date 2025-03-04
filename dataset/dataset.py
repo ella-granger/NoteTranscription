@@ -57,18 +57,23 @@ class MelDataset(torch.utils.data.Dataset):
 
 
     def convert_notelist(self, note):
-        notes = []
-
+        notes_dict = {}
         for bar in note:
             for part, note_list in bar.items():
                 if part[0] in self.voice_list:
                     for n in note_list:
-                        new_n = deepcopy(n)
-                        # Leave for part
-                        # new_n.append(self.voice_list.index(part[0]))
-                        notes.append(tuple(new_n))
+                        new_n = tuple(n)
+                        if new_n not in notes_dict:
+                            notes_dict[new_n] = []
+                        notes_dict[new_n].append(self.voice_list.index(part[0]))
 
-        notes = list(set(notes))
+        notes = []
+        for k in notes_dict:
+            voice_list = [0, 0, 0, 0]
+            for v in notes_dict[k]:
+                voice_list[v] = 1
+            notes.append((k[0], k[1], k[2], k[3], k[4], tuple(voice_list)))
+
         notes = sorted(notes, key=lambda x:(x[3], -x[0]))
         
         begin = [] # begin time index. The first note which ENDS AFTER the index second
@@ -122,7 +127,7 @@ class MelDataset(torch.utils.data.Dataset):
             note_list = []
             for n in notes_tmp:
                 if n[3] < end_time and n[4] >= begin_time:
-                    new_n = (n[0], max(n[3], begin_time), min(n[4], end_time))
+                    new_n = (n[0], max(n[3], begin_time), min(n[4], end_time), n[5])
                     note_list.append(new_n)
 
             note_list = sorted(note_list, key=lambda x:(x[1], -x[0]))
@@ -130,11 +135,15 @@ class MelDataset(torch.utils.data.Dataset):
             token = [x[0] for x in note_list]
             start = [x[1] for x in note_list]
             end = [x[2] for x in note_list]
+            voice = [x[3] for x in note_list]
 
             token.insert(0, MAX_MIDI + 1)
             token.append(MAX_MIDI + 2)
             token = torch.LongTensor(token)
             token = token - MIN_MIDI
+            voice.insert(0, (0, 0, 0, 0))
+            voice.append((0, 0, 0, 0))
+            voice = torch.FloatTensor(voice)
 
             start.insert(0, begin_time)
             end.insert(0, begin_time)
@@ -157,6 +166,7 @@ class MelDataset(torch.utils.data.Dataset):
                     pitch=token,
                     start=start,
                     dur=dur,
+                    voice=voice,
                     begin_time=begin_time,
                     end_time=end_time,
                     fid=fid)
@@ -165,11 +175,18 @@ class MelDataset(torch.utils.data.Dataset):
 
         pad_dict = {"pitch": PAD_IDX,
                     "start": 0.0,
-                    "dur": 0.0}
+                    "dur": 0.0,
+                    "voice": 0.0,
+        }
 
         def pad_and_stack(x_list, pad):
             max_len = max([len(x) for x in x_list])
-            x_list = [F.pad(x, (0, max_len - len(x)), value=pad) for x in x_list]
+            if len(x_list[0].shape) == 1:
+                x_list = [F.pad(x, (0, max_len - len(x)), value=pad) for x in x_list]
+            else:
+                x_list = [x.permute(1, 0) for x in x_list]
+                x_list = [F.pad(x, (0, max_len - x.size(1)), value=pad) for x in x_list]
+                x_list = [x.permute(1, 0) for x in x_list]
             return torch.stack(x_list)
 
         result = {}

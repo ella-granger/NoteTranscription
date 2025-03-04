@@ -19,6 +19,10 @@ def get_mix_mask(pitch, t):
     return U
 
 
+def get_trg_mask(pitch):
+    return get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
+
+
 class TimeEncoding(nn.Module):
 
     def __init__(self, d_hid, d_model, seg_len):
@@ -122,9 +126,10 @@ class NoteTransformer(nn.Module):
                                    scale_emb=True)
 
         # Decoder
-        self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model // 2, padding_idx=PAD_IDX)
-        self.start_prj = TimeEncoding(d_model // 4, d_model, seg_len)
-        self.dur_prj = TimeEncoding(d_model // 4, d_model, seg_len)
+        self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model, padding_idx=PAD_IDX)
+        self.trg_voice_emb = nn.Linear(4, d_model)
+        self.start_prj = TimeEncoding(d_model, d_model, seg_len)
+        self.dur_prj = TimeEncoding(d_model, d_model, seg_len)
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
@@ -135,6 +140,7 @@ class NoteTransformer(nn.Module):
         # Result
         # self.trg_pitch_prj = nn.Linear(d_model, PAD_IDX+1)
         self.trg_pitch_prj = MLP(d_model, [d_model, d_model, PAD_IDX+1])
+        self.trg_voice_prj = MLP(d_model, [d_model // 2, d_model // 4, 4])
         # self.trg_start_prj = nn.Linear(d_model // 8, 1)
         # self.trg_dur_prj = nn.Linear(d_model // 8, 1)
         # self.trg_pitch_prj = nn.Linear(d_model * 3 // 4, PAD_IDX+1)
@@ -146,15 +152,14 @@ class NoteTransformer(nn.Module):
         elif prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
             # self.trg_start_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
             # self.trg_dur_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
-            self.trg_start_prj = MLP(d_model, [d_model, d_model, 1])
-            self.trg_dur_prj = MLP(d_model, [d_model, d_model, 1])
+            self.trg_start_prj = MLP(d_model, [d_model // 2, d_model // 4, 1])
+            self.trg_dur_prj = MLP(d_model, [d_model // 2, d_model // 4, 1])
             # self.trg_start_prj = nn.Linear(d_model, 1)
             # self.trg_dur_prj = nn.Linear(d_model, 1)
 
 
-    def forward(self, mel, pitch, start, dur, return_attns=False, return_cnn=False):
+    def encode(self, mel, return_attns=False, return_cnn=False):
         return_attns = return_attns & self.enable_encoder
-        # mel feature extraction
         mel = self.cnn(mel)
         if return_cnn:
             self.mel_result = mel
@@ -170,81 +175,109 @@ class NoteTransformer(nn.Module):
         if return_cnn:
             self.enc_result = torch.permute(mel, (0, 2, 1))
 
+        if return_attns:
+            return mel, enc_attn
+        else:
+            return mel
+
+
+    def decode(self, mel, trg_seq, trg_mask, return_attns=False):
         # decoding
-        trg_mask = get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
-
-        start = torch.unsqueeze(start, -1)
-        dur = torch.unsqueeze(dur, -1)
-        start = self.start_prj(start)
-        dur = self.dur_prj(dur)
-        pitch = self.trg_pitch_emb(pitch)
-
-        # print(pitch.size())
-        # print(start.size())
-        # print(dur.size())
-        trg_seq = torch.cat([pitch, start, dur], dim=-1)
-
         if return_attns:
             dec, dec_self_attn, dec_enc_attn = self.decoder(trg_seq, trg_mask, mel, return_attns=True)
         else:
             dec, *_ = self.decoder(trg_seq, trg_mask, mel)
 
-        # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
         pitch_out = self.trg_pitch_prj(dec)
+        voice_out = self.trg_voice_prj(dec)
+        voice_out = F.sigmoid(voice_out)
 
-        # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-        # dur_out = self.trg_dur_prj(dec[:, :, (-self.d_model // 8):])
         start_out = self.trg_start_prj(dec)
         dur_out = self.trg_dur_prj(dec)
         
         start_out = F.sigmoid(start_out)
         dur_out = F.sigmoid(dur_out)
-        # start_out = F.elu(start_out) + 2
-        # dur_out = F.elu(dur_out) + 2
-        
-        # pitch_out = self.trg_pitch_prj(dec[:, :, :(self.d_model * 3 // 4)])
-        # start_out = self.trg_start_prj(dec[:, :, (-self.d_model // 4):(-self.d_model // 8)])
-        # start_out = F.sigmoid(start_out)
-        # dur_out = self.trg_dur_prj(dec[:, :, (-self.d_model // 8):])
-        # dur_out = F.sigmoid(dur_out)
 
-        result = (pitch_out, start_out, dur_out)
-        
+        result = (pitch_out, start_out, dur_out, voice_out)
+
         # return pitch_out, start_out, dur_out
         if return_attns:
-            return result, (enc_attn, dec_self_attn, dec_enc_attn)
+            return result, (dec_self_attn, dec_enc_attn)
         else:
             return result
 
 
-    def get_mix_emb(self, p, i, emb):
+    def get_trg_emb(self, pitch, start, dur, voice):
+        start = torch.unsqueeze(start, -1)
+        dur = torch.unsqueeze(dur, -1)
+        start = self.start_prj(start)
+        dur = self.dur_prj(dur)
+        
+        pitch = self.trg_pitch_emb(pitch)
+        voice = self.trg_voice_emb(voice)
+
+        trg_seq = pitch + start + dur + voice
+
+        return trg_seq
+
+
+    def forward(self, mel, pitch, start, dur, voice, return_attns=False, return_cnn=False):
+        if return_attns:
+            mel, enc_attn = self.encode(mel, return_attns, return_cnn)
+        else:
+            mel = self.encode(mel, return_attns, return_cnn)
+
+        trg_mask = get_trg_mask(pitch)
+        trg_seq = self.get_trg_emb(pitch, start, dur, voice)
+        
+        # return pitch_out, start_out, dur_out
+        if return_attns:
+            result, (dec_self_attn, dec_enc_attn) = self.decode(mel, trg_seq, trg_mask, return_attns)
+            return result, (enc_attn, dec_self_attn, dec_enc_attn)
+        else:
+            result = self.decode(mel, trg_seq, trg_mask)
+            return result
+
+
+    def get_mix_emb(self, p, i, emb, mix):
         # p
         e = emb.weight #(idx_num, emb_dim)
-        # print(p.mean())
-        # print(p.std())
         G_y = torch.rand(e.size(0))
-        # print(G_y)
         G_y = -torch.log(-torch.log(G_y))
-        # print(G_y)
 
         device = p.device
         G_y = G_y.to(device)
 
-        # print(p.size())
-        # print(G_y.size())
         s = self.alpha * p + G_y
-        # print(s.mean())
-        # print(s.std())
-        # print(s[0, 3, :])
         w = F.softmax(s, dim=-1)
-        # print(w[0, 3, :])
-
-        # print(w.size())
-        # print(e.size())
         e = torch.matmul(w, e)
-        # print(e.size())
-        # _ = input()
-        return e
+
+        emb_i = emb(i)
+        emb_i[mix] = e[:, :-1][mix[:, 1:]]
+        return emb_i
+
+
+    def get_mix_trg(self, pred, ref, t):
+        pitch_p, start_p, dur_p, voice_p = pred
+        pitch_r, start_r, dur_r, voice_r = ref
+        mix_mask = get_mix_mask(pitch_r, t)
+
+        pitch = self.get_mix_emb(pitch_p, pitch_r, self.trg_pitch_emb, mix_mask)
+        # voice = self.get_mix_emb(voice_p, voice_r, self.trg_voice_emb, mix_mask)
+
+        start = torch.unsqueeze(start_r, -1)
+        dur = torch.unsqueeze(dur_r, -1)
+        start[mix_mask] = start_p[:, :-1][mix_mask[:, 1:]]
+        dur[mix_mask] = dur_p[:, :-1][mix_mask[:, 1:]]
+        voice = voice_r
+        voice[mix_mask] = voice_p[:, :-1][mix_mask[:, 1:]]
+        start = self.start_prj(start)
+        dur = self.dur_prj(dur)
+        voice = self.trg_voice_emb(voice)
+
+        trg_seq = pitch + start + dur + voice
+
+        return trg_seq
 
 
     def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, beam_size=2):
