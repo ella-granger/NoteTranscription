@@ -1,7 +1,7 @@
 {
-    "logdir": "rewrite/l1diou_seg320_layer4",
+    "logdir": "rewrite/l1diou_seg320_layer2",
 
-    "n_layers": 4,
+    "n_layers": 2,
     "prob_model": "l1-diou",
     "seg_len": 320,
 
