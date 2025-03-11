@@ -36,6 +36,7 @@ class TimeEncoding(nn.Module):
     def forward(self, x):
         # x: (B, L, 1) ~ (0, 1)
         # enc = 200 * x
+        # print(x.size())
         enc = x.repeat(1, 1, self.d_hid)
 
         for j in range(self.d_hid):
@@ -149,6 +150,10 @@ class NoteTransformer(nn.Module):
             # self.trg_dur_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
             self.trg_start_prj = nn.Linear(d_model, 2)
             self.trg_dur_prj = nn.Linear(d_model, 2)
+
+            self.trg_start_prj = MLP(d_model, [d_model // 2, d_model // 4, 2])
+            self.trg_dur_prj = MLP(d_model, [d_model // 2, d_model // 4, 2])
+            
         elif prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
             # self.trg_start_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
             # self.trg_dur_prj = nn.Linear(d_model // 8 // len(train_mode), 1)
@@ -208,8 +213,11 @@ class NoteTransformer(nn.Module):
 
 
     def get_trg_emb(self, pitch, start, dur, voice):
-        start = torch.unsqueeze(start, -1)
-        dur = torch.unsqueeze(dur, -1)
+        if len(start.size()) < 3:
+            start = torch.unsqueeze(start, -1)
+            dur = torch.unsqueeze(dur, -1)
+        # print(start.size())
+        # print(dur.size())
         start = self.start_prj(start)
         dur = self.dur_prj(dur)
         
@@ -280,25 +288,49 @@ class NoteTransformer(nn.Module):
         return trg_seq
 
 
-    def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, beam_size=2):
-        device = mel.device
-        mel = self.cnn(mel)
-        mel = torch.permute(mel, (0, 2, 1))
+    def sample(self, mel):
+        B = mel.size(0)
+        device = mel.devicex
+        mel = self.encode(mel, False, False)
 
-        enc, *_ = self.encoder(mel)
-        enc = enc.repeat((beam_size, 1, 1))
-        # print(enc.size())
+        MAX_LEN = 200
+        pitch = torch.zeros((B, MAX_LEN), dtype=int).to(device)
+        voice = torch.zeros((B, MAX_LEN), dypte=int).to(device)
+        start = torch.zeros((B, MAX_LEN, 1), dtype=torch.float64).to(device)
+        dur = torch.zeros((B, MAX_LEN, 1), dtype=torch.float64).to(device)
+        
+        mask = torch.zeros((B, 1, MAX_LEN), dtype=bool).to(device)
+        pitch[:, 0] = INI_IDX
+        voice[:, 0] = 4
+
+        for i in range(MAX_LEN-1):
+            mask[:, :, i] = True
+
+            trg_seq = self.get_trg_emb(pitch, start, dur, voice)
+            pitch_p, start_p, dur_p, voice_p = self.decode(mel, trg_seq, mask)
+
+            
+
+
+    def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, prev_voice=None, beam_size=2):
+        device = mel.device
+        mel = self.encode(mel, False, False)
+        mel = mel.repeat((beam_size, 1, 1))
+        print(mel.size())
 
         MAX_LEN = 200
         p_start = 0
         pitch = torch.zeros((beam_size, MAX_LEN), dtype=int).to(device)
+        voice = torch.zeros((beam_size, MAX_LEN, 4), dtype=torch.float64).to(device)
         start = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
         dur = torch.zeros((beam_size, MAX_LEN, 1), dtype=torch.float64).to(device)
         mask = torch.zeros((beam_size, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
+        voice[:, 0] = 4
         if prev_pitch is not None:
             for b in range(beam_size):
                 pitch[b, 1:len(prev_pitch)+1] = prev_pitch
+                voice[b, 1:len(prev_pitch)+1] = prev_voice
                 start[b, 1:len(prev_pitch)+1, 0] = prev_start
                 dur[b, 1:len(prev_pitch)+1, 0] = prev_dur
                 mask[b, :, :len(prev_pitch)+1] = True
@@ -308,27 +340,12 @@ class NoteTransformer(nn.Module):
         len_map = torch.arange(1, MAX_LEN + 1, dtype=torch.long).unsqueeze(0).to(device)
         for i in tqdm(range(p_start, MAX_LEN-1)):
             mask[:, :, i] = True
-            # print(mask)
-            # print(pitch)
-            # _ = input()
 
-            pitch_emb = self.trg_pitch_emb(pitch)
-            start_emb = self.start_prj(start)
-            dur_emb = self.dur_prj(dur)
-
-            trg_seq = torch.cat([pitch_emb, start_emb, dur_emb], dim=-1)
-
-            # print(trg_seq.size())
-            dec, *_ = self.decoder(trg_seq[:, :(i+1), :], mask[:, :, :(i+1)], enc)
-
-            pitch_out = self.trg_pitch_prj(dec)
-            start_out = self.trg_start_prj(dec)
-            dur_out = self.trg_dur_prj(dec)
-            start_out = F.sigmoid(start_out)
-            dur_out = F.sigmoid(dur_out)
+            trg_seq = self.get_trg_emb(pitch, start, dur, voice)
+            pitch_p, start_p, dur_p, voice_p = self.decode(mel, trg_seq, mask)
 
             # Beam Search
-            pitch_p = F.softmax(pitch_out, dim=-1)
+            pitch_p = F.softmax(pitch_p, dim=-1)
             if i == 0:
                 best_k2_probs, best_k2_idx = pitch_p[0:1, i, :].topk(beam_size)
             else:
@@ -357,15 +374,21 @@ class NoteTransformer(nn.Module):
                 break
             # _ = input()
 
-            # pitch_pred = torch.argmax(pitch_out[:, i, :]) # Greedy
+            # pitch_pred = torch.argmax(pitch_p[:, i, :]) # Greedy
             # if pitch_pred.item() == EOS_IDX:
             #     break
             # pitch[:, i+1] = pitch_pred
-            if "T" in self.train_mode:
-                start[:, :i+1] = start[best_k_r_idxs, :i+1]
-                start[:, i+1, 0] = start_out[best_k_r_idxs, i, 0]
-                dur[:, :i+1] = dur[best_k_r_idxs, :i+1]
-                dur[:, i+1, 0] = dur_out[best_k_r_idxs, i, 0]
+            # print(voice_p.size())
+            voice_p = torch.argmax(voice_p[:, i, :], dim=-1)
+            # print(voice_p)
+            voice[:, :i+1] = voice[best_k_r_idxs, :i+1]
+            for j in range(voice.size(0)):
+                voice[j, i+1, voice_p[j]] = 1 # voice_p[best_k_r_idxs, i]
+            # if "T" in self.train_mode:
+            start[:, :i+1] = start[best_k_r_idxs, :i+1]
+            start[:, i+1, 0] = start_p[best_k_r_idxs, i, 0]
+            dur[:, :i+1] = dur[best_k_r_idxs, :i+1]
+            dur[:, i+1, 0] = dur_p[best_k_r_idxs, i, 0]
             # print(pitch[:, :i+2])
             # print(start[:, :i+2, 0])
             # print(dur[:, :i+2, 0])
@@ -377,10 +400,11 @@ class NoteTransformer(nn.Module):
         # print(ans_len)
         # _ = input()
         pitch = pitch[ans_idx:ans_idx+1, 1:ans_len-1]
+        voice = voice[ans_idx:ans_idx+1, 1:ans_len-1]
         start = start[ans_idx:ans_idx+1, 1:ans_len-1, 0]
         dur = dur[ans_idx:ans_idx+1, 1:ans_len-1, 0]
 
-        return pitch, start, dur
+        return pitch, start, dur, voice
         
 
 

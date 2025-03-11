@@ -17,6 +17,7 @@ import numpy as np
 from dataset.dataset import MelDataset
 from model import NoteTransformer, get_trg_mask
 from transformer.Optim import ScheduledOptim
+from mir_metrics import cal_mir_metrics
 from tqdm import tqdm
 from dataset.constants import *
 from utils import *
@@ -101,7 +102,7 @@ def get_time_loss(prob_model):
         return masked_beta_nll
     elif prob_model == "gaussian":
         return lambda p, o, m : masked_normal_nll(p, o, m)
-    elif prob_model == "guassian-mu":
+    elif prob_model == "gaussian-mu":
         return lambda p, o, m : masked_normal_nll(p, o, m, 0.05)
     elif prob_model == "l1":
         return masked_l1_loss
@@ -267,36 +268,42 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
             optimizer.zero_grad()
             if self_critical:
-                
-            if not scheduled_sampling or step < scheduled_sampling_step:
-                result = model(mel, pitch_i, start_i, dur_i, voice_i)
-            else:
-                mel = model.encode(mel)
+                model.eval()
                 with torch.no_grad():
+                    greedy = # model sample greedy
+                model.train()
+                gen, probs = # model sample
+                
+            else:
+                if not scheduled_sampling or step < scheduled_sampling_step:
+                    result = model(mel, pitch_i, start_i, dur_i, voice_i)
+                else:
+                    mel = model.encode(mel)
+                    with torch.no_grad():
+                        trg_mask = get_trg_mask(pitch_i)
+                        trg_seq = model.get_trg_emb(pitch_i, start_i, dur_i, voice_i)
+                        result = model.decode(mel, trg_seq, trg_mask)
+
+                    t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
                     trg_mask = get_trg_mask(pitch_i)
-                    trg_seq = model.get_trg_emb(pitch_i, start_i, dur_i, voice_i)
+                    ref = (pitch_i, start_i, dur_i, voice_i)
+
+                    trg_seq = model.get_mix_trg(result, ref, t)
                     result = model.decode(mel, trg_seq, trg_mask)
 
-                t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
-                trg_mask = get_trg_mask(pitch_i)
-                ref = (pitch_i, start_i, dur_i, voice_i)
+                pitch_p, start_p, dur_p, voice_p = result
 
-                trg_seq = model.get_mix_trg(result, ref, t)
-                result = model.decode(mel, trg_seq, trg_mask)
-                
-            pitch_p, start_p, dur_p, voice_p = result
-          
-            pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
-            seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
-            voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
-            start_loss = time_loss(start_p, start_o, seq_mask)
-            dur_loss = time_loss(dur_p, dur_o, seq_mask)
+                pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
+                seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
+                voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
+                start_loss = time_loss(start_p, start_o, seq_mask)
+                dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
-            diou_loss = 0  
-            if "diou" in prob_model:
-                diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
+                diou_loss = 0  
+                if "diou" in prob_model:
+                    diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
 
-            loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
+                loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
 
             loss.backward()
             optimizer.step()
@@ -306,18 +313,21 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 itr.set_description("pitch: %.2f" % (pitch_loss.item()))
 
             if step % summary_interval == 0:
-                sw.add_scalar("training/loss", loss.item(), step)
-                sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
-                sw.add_scalar("training/voice_loss", voice_loss.item(), step)
-                if "diou" in prob_model:
-                    sw.add_scalar("training/diou_loss", diou_loss.item(), step)
-                if "f1" in prob_model:
-                    sw.add_scalar("training/start_loss", start_loss.item(), step)
-                    sw.add_scalar("training/dur_loss", dur_loss.item(), step)
-                sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
-                if scheduled_sampling:
-                    t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
-                    sw.add_scalar("training/scheduled_sampling_t", t, step)
+                if self_critical:
+                    we
+                else:
+                    sw.add_scalar("training/loss", loss.item(), step)
+                    sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
+                    sw.add_scalar("training/voice_loss", voice_loss.item(), step)
+                    if "diou" in prob_model:
+                        sw.add_scalar("training/diou_loss", diou_loss.item(), step)
+                    if "f1" in prob_model:
+                        sw.add_scalar("training/start_loss", start_loss.item(), step)
+                        sw.add_scalar("training/dur_loss", dur_loss.item(), step)
+                    sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
+                    if scheduled_sampling:
+                        t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
+                        sw.add_scalar("training/scheduled_sampling_t", t, step)
 
             if step % val_interval == 0:
                 model.eval()

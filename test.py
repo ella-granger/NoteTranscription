@@ -13,10 +13,8 @@ from dataset.dataset import MelDataset
 from dataset.constants import *
 from model import NoteTransformer
 from utils import *
+from mir_metrics import cal_mir_metrics
 
-from mir_eval.multipitch import evaluate as evaluate_frames
-from mir_eval.transcription import precision_recall_f1_overlap as evaluate_notes
-from mir_eval.util import midi_to_hz
 from scipy.stats import hmean
 from collections import defaultdict
 
@@ -39,41 +37,6 @@ def merge_notes(note_list):
     if len(result) > 0:
         result[-1][-1] = prev_end
     return result
-
-
-def cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len, tolerance=0.05):
-    pitch = pitch.detach().cpu().numpy()[0]
-    start_t = start_t.detach().cpu().numpy()[0]
-    end = end.detach().cpu().numpy()[0]
-    pitch_p = pitch_p.detach().cpu().numpy()[0]
-    start_t_p = start_t_p.detach().cpu().numpy()[0]
-    end_p = end_p.detach().cpu().numpy()[0]
-    
-    scaling = HOP_LENGTH / SAMPLE_RATE * seg_len
-    p_est = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch_p])
-    p_ref = np.array([midi_to_hz(m + MIN_MIDI - 1) for m in pitch])
-    i_est = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t_p, end_p)]).reshape(-1, 2)
-    i_ref = np.array([(s * scaling, (s+d) * scaling) for (s, d) in zip(start_t, end)]).reshape(-1, 2)
-
-    metrics = dict()
-    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, offset_ratio=None, onset_tolerance=tolerance)
-    metrics['metric/note/precision'] = p
-    metrics['metric/note/recall'] = r
-    metrics['metric/note/f1'] = f
-    metrics['metric/note/overlap'] = o
-
-    p, r, f, o = evaluate_notes(i_ref, p_ref, i_est, p_est, onset_tolerance=tolerance)
-    metrics['metric/note-with-offsets/precision'] = p
-    metrics['metric/note-with-offsets/recall'] = r
-    metrics['metric/note-with-offsets/f1'] = f
-    metrics['metric/note-with-offsets/overlap'] = o
-
-    # frame_metrics = evaluate_frames(t_ref, f_ref, t_est, f_est)
-    # metrics['metric/frame/f1'].append(hmean([frame_metrics['Precision'] + eps, frame_metrics['Recall'] + eps]) - eps)
-    # for key, loss in frame_metrics.items():
-    #     metrics['metric/frame/' + key.lower().replace(' ', '_')].append(loss)
-
-    return metrics
 
 
 def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
@@ -210,17 +173,18 @@ def cfg():
     ckpt_id = "best"
     # ckpt_id = "cur"
     mix_k = 0
+    ss_epsilon = 0
     epsilon = 0
     seg_len = SEG_LEN
     time_lambda = 3
 
 
 @ex.automain
-def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
+def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, ss_epsilon, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
-         val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder,
-         scheduled_sampling, prob_model, seg_len, time_lambda):
+         val_interval, loss_norm, time_loss_alpha, enable_encoder,
+         scheduled_sampling, prob_model, seg_len, time_lambda, scheduled_sampling_step):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
@@ -233,7 +197,6 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     test_data = MelDataset(data_path / "mel",
                            data_path / "note",
                            data_path / "test.json",
-                           train_mode,
                            seg_len=seg_len,
                            device=device)
     print(len(test_data))
@@ -242,7 +205,6 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
-                            train_mode=train_mode,
                             seg_len=seg_len,
                             enable_encoder=enable_encoder,
                             prob_model=prob_model).to(device)
@@ -263,48 +225,35 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             mel = x["mel"].to(device).double()
             pitch = x["pitch"]
             pitch = pitch[:, 1:-1]
+            voice = x["voice"]
+            voice = voice[:, 1:-1]
             
-            start = None
-            dur = None
-            start_t = None
-            end = None
-            if "S" in train_mode:
-                start = x["start"].to(device)
-                start = start[:, 1:-1]
-                dur = x["dur"].to(device)
-                dur = dur[:, 1:-1]
-            if "T" in train_mode:
-                start_t = x["start_t"].to(device)
-                start_t = start_t[:, 1:-1]
-                end = x["end"].to(device)
-                end = end[:, 1:-1]
+            start = x["start"].to(device)
+            start = start[:, 1:-1]
+            dur = x["dur"].to(device)
+            dur = dur[:, 1:-1]
 
             fid = x["fid"][0]
             begin_time = x["begin_time"][0].item()
             end_time = x["end_time"][0].item()
 
             # print(pitch - 1 + MIN_MIDI)
-            print(pitch)
-            print(start_t)
-            print(end)
+            print(pitch.size())
+            print(voice.size())
+            print(start.size())
+            print(dur.size())
             print(fid, begin_time, end_time)
             # _ = input()
 
-            tf = model(mel, x["pitch"].to(device)[:, :-1], None, None,
-                       x["start_t"].to(device)[:, :-1], x["end"].to(device)[:, :-1])
-            tf_p, tf_start, tf_end = tf
+            tf = model(mel, x["pitch"].to(device)[:, :-1], x["start"].to(device)[:, :-1], x["dur"].to(device)[:, :-1], x["voice"].to(device)[:, :-1].double())
+            tf_p, tf_start, tf_end, tf_voice = tf
             tf_p = torch.argmax(tf_p, dim=-1)
             print(tf_p)
             print(tf_start.reshape(1, -1))
             print(tf_end.reshape(1, -1))
             result = model.predict(mel, beam_size=4)
 
-            if train_mode == "S":
-                pitch_p, start_p, dur_p = result
-            elif train_mode == "T":
-                pitch_p, start_t_p, end_p = result
-            else:
-                pitch_p, start_t_p, end_p, start_p, dur_p = result
+            pitch_p, start_p, dur_p, voice_p = result
 
             length = pitch_p.size(1)
             # if length > 200:
@@ -317,16 +266,19 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # print(pitch)
             # print(start_t)
             print(pitch_p)
-            # print(start_p)
-            # print(dur_p)
-            print(start_t_p)
-            print(end_p)
+            print(start_p)
+            print(dur_p)
+            end_p = start_p + dur_p
+            # _ = input()
+            # print(start_t_p)
+            # print(end_p)
             end_p = torch.clamp(end_p, 1e-4, 1.0)
+            dur_p = end_p - start_p
             # print("------")
             # _ = input()
 
-            frame, _, _ = cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p)
-            metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
+            frame, _, _ = cal_metrics(pitch, start, dur, pitch_p, start_p, dur_p)
+            metrics = cal_mir_metrics(pitch, start, dur, pitch_p, start_p, dur_p, seg_len)
             # print(metrics)
             for k, v in metrics.items():
                 mets[k].append(v)
@@ -336,25 +288,16 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # off_c += offset
 
             if i < 5:
-                if "S" in train_mode:
-                    pred_list = get_list_s(pitch_p, start_p, dur_p)
-                    gt_list = get_list_s(pitch, start, dur)
-                    fig_pred = plot_score(*pred_list)
-                    fig_pred.savefig(logdir / ("pred_score_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
-                    fig_gt = plot_score(*gt_list)
-                    fig_gt.savefig(logdir / ("gt_score_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
+                pred_list = get_list_t(pitch_p, start_p, dur_p, voice_p)
+                gt_list = get_list_t(pitch, start, dur, voice)
+                fig_pred = plot_midi(pred_list)
+                fig_pred.savefig(logdir / ("pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
+                fig_gt = plot_midi(gt_list)
+                fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
 
-                if "T" in train_mode:
-                    pred_list = get_list_t(pitch_p, start_t_p, end_p)
-                    gt_list = get_list_t(pitch, start_t, end)
-                    
-                    fig_pred = plot_midi(*pred_list, inc=True)
-                    fig_pred.savefig(logdir / ("pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
-                    fig_gt = plot_midi(*gt_list, inc=True)
-                    fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
             # else:
             #     break
-            break
+            # break
 
     print(f_c)
     frame_p = f_c[1] / f_c[0]
