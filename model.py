@@ -328,11 +328,11 @@ class NoteTransformer(nn.Module):
             # if pitch_pred.item() == EOS_IDX:
             #     break
             # pitch[:, i+1] = pitch_pred
-            if "T" in self.train_mode:
-                start[:, :i+1] = start[best_k_r_idxs, :i+1]
-                start[:, i+1, 0] = start_out[best_k_r_idxs, i, 0]
-                dur[:, :i+1] = dur[best_k_r_idxs, :i+1]
-                dur[:, i+1, 0] = dur_out[best_k_r_idxs, i, 0]
+            # if "T" in self.train_mode:
+            start[:, :i+1] = start[best_k_r_idxs, :i+1]
+            start[:, i+1, 0] = start_out[best_k_r_idxs, i, 0]
+            dur[:, :i+1] = dur[best_k_r_idxs, :i+1]
+            dur[:, i+1, 0] = dur_out[best_k_r_idxs, i, 0]
             # print(pitch[:, :i+2])
             # print(start[:, :i+2, 0])
             # print(dur[:, :i+2, 0])

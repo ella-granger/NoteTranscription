@@ -219,7 +219,7 @@ def cfg():
 def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
         checkpoint_interval, batch_size, learning_rate, warmup_steps,
         clip_gradient_norm, epochs, output_interval, summary_interval,
-         val_interval, loss_norm, time_loss_alpha, train_mode, enable_encoder,
+         val_interval, loss_norm, time_loss_alpha, enable_encoder,
          scheduled_sampling, prob_model, seg_len, time_lambda):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
@@ -233,7 +233,6 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
     test_data = MelDataset(data_path / "mel",
                            data_path / "note",
                            data_path / "test.json",
-                           train_mode,
                            seg_len=seg_len,
                            device=device)
     print(len(test_data))
@@ -242,7 +241,6 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
-                            train_mode=train_mode,
                             seg_len=seg_len,
                             enable_encoder=enable_encoder,
                             prob_model=prob_model).to(device)
@@ -264,20 +262,10 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             pitch = x["pitch"]
             pitch = pitch[:, 1:-1]
             
-            start = None
-            dur = None
-            start_t = None
-            end = None
-            if "S" in train_mode:
-                start = x["start"].to(device)
-                start = start[:, 1:-1]
-                dur = x["dur"].to(device)
-                dur = dur[:, 1:-1]
-            if "T" in train_mode:
-                start_t = x["start_t"].to(device)
-                start_t = start_t[:, 1:-1]
-                end = x["end"].to(device)
-                end = end[:, 1:-1]
+            start = x["start"].to(device)
+            start = start[:, 1:-1]
+            dur = x["dur"].to(device)
+            dur = dur[:, 1:-1]
 
             fid = x["fid"][0]
             begin_time = x["begin_time"][0].item()
@@ -285,26 +273,21 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
 
             # print(pitch - 1 + MIN_MIDI)
             print(pitch)
-            print(start_t)
-            print(end)
+            print(start)
+            print(dur)
             print(fid, begin_time, end_time)
             # _ = input()
 
-            tf = model(mel, x["pitch"].to(device)[:, :-1], None, None,
-                       x["start_t"].to(device)[:, :-1], x["end"].to(device)[:, :-1])
-            tf_p, tf_start, tf_end = tf
+            tf = model(mel, x["pitch"].to(device)[:, :-1],
+                       x["start"].to(device)[:, :-1], x["dur"].to(device)[:, :-1])
+            tf_p, tf_start, tf_dur = tf
             tf_p = torch.argmax(tf_p, dim=-1)
             print(tf_p)
             print(tf_start.reshape(1, -1))
-            print(tf_end.reshape(1, -1))
+            print(tf_dur.reshape(1, -1))
             result = model.predict(mel, beam_size=4)
 
-            if train_mode == "S":
-                pitch_p, start_p, dur_p = result
-            elif train_mode == "T":
-                pitch_p, start_t_p, end_p = result
-            else:
-                pitch_p, start_t_p, end_p, start_p, dur_p = result
+            pitch_p, start_p, dur_p = result
 
             length = pitch_p.size(1)
             # if length > 200:
@@ -319,14 +302,16 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             print(pitch_p)
             # print(start_p)
             # print(dur_p)
-            print(start_t_p)
-            print(end_p)
-            end_p = torch.clamp(end_p, 1e-4, 1.0)
+            print(start_p)
+            print(dur_p)
+
+            end_p = start_p + dur_p
+            dur_p = torch.clamp(end_p, 1e-4, 1.0) - start_p
             # print("------")
             # _ = input()
 
-            frame, _, _ = cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p)
-            metrics = cal_mir_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p, seg_len)
+            frame, _, _ = cal_metrics(pitch, start, dur, pitch_p, start_p, dur_p)
+            metrics = cal_mir_metrics(pitch, start, dur, pitch_p, start_p, dur_p, seg_len)
             # print(metrics)
             for k, v in metrics.items():
                 mets[k].append(v)
@@ -336,25 +321,16 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, epsilon,
             # off_c += offset
 
             if i < 5:
-                if "S" in train_mode:
-                    pred_list = get_list_s(pitch_p, start_p, dur_p)
-                    gt_list = get_list_s(pitch, start, dur)
-                    fig_pred = plot_score(*pred_list)
-                    fig_pred.savefig(logdir / ("pred_score_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
-                    fig_gt = plot_score(*gt_list)
-                    fig_gt.savefig(logdir / ("gt_score_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
+                pred_list = get_list_t(pitch_p, start_p, dur_p)
+                gt_list = get_list_t(pitch, start, dur)
+                fig_pred = plot_score(*pred_list)
+                fig_pred.savefig(logdir / ("pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
+                fig_gt = plot_score(*gt_list)
+                fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
 
-                if "T" in train_mode:
-                    pred_list = get_list_t(pitch_p, start_t_p, end_p)
-                    gt_list = get_list_t(pitch, start_t, end)
-                    
-                    fig_pred = plot_midi(*pred_list, inc=True)
-                    fig_pred.savefig(logdir / ("pred_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
-                    fig_gt = plot_midi(*gt_list, inc=True)
-                    fig_gt.savefig(logdir / ("gt_trans_%d_%s_%.2f_%.2f.png" % (i, fid, begin_time, end_time)))
             # else:
             #     break
-            break
+            # break
 
     print(f_c)
     frame_p = f_c[1] / f_c[0]
