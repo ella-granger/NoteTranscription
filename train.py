@@ -11,6 +11,12 @@ from torch.distributions.normal import Normal
 from torch.distributions.beta import Beta
 import torchaudio
 import torch_optimizer as optim
+
+from torch.distributions.normal import Normal
+from torch.distributions.uniform import Uniform
+from torch.distributions.transforms import SigmoidTransform, AffineTransform
+from torch.distributions.transformed_distribution import TransformedDistribution
+
 import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
@@ -24,7 +30,9 @@ from utils import *
 import torch.multiprocessing as mp
 mp.set_start_method("fork", force=True)
 
+
 ex = Experiment("train_transcriber")
+
 
 def patch_trg(trg):
     gold = trg[:, 1:].contiguous()
@@ -97,6 +105,42 @@ def masked_l1_loss(pred, gt, mask):
     return loss
 
 
+def build_sigmoid_logistics(mu, sigma):
+    uni = Uniform(0, 1)
+    trans = [SigmoidTransform().inv, AffineTransform(mu, sigma), SigmoidTransform()]
+    return TransformedDistribution(uni, trans)
+
+
+def masked_sig_log(pred, gt, mask):
+    batch_sum = 0
+    for i in range(gt.size(0)):
+        mu = pred[i, :, 0][mask[i]]
+        sigma = pred[i, :, 1][mask[i]]
+        dist = build_sigmoid_logistics(mu, sigma)
+        tar = gt[i, :][mask[i]]
+        nll = torch.sum(-dist.log_prob(tar))
+        batch_sum += nll
+    return batch_sum
+
+
+def build_sigmoid_gaussian(mu, sigma):
+    norm = Normal(mu, sigma)
+    trans = [SigmoidTransform()]
+    return TransformedDistribution(norm, trans)
+
+
+def masked_sig_norm(pred, gt, mask):
+    batch_sum = 0
+    for i in range(gt.size(0)):
+        mu = pred[i, :, 0][mask[i]]
+        sigma = pred[i, :, 1][mask[i]]
+        dist = build_sigmoid_gaussian(mu, sigma)
+        tar = gt[i, :][mask[i]]
+        nll = torch.sum(-dist.log_prob(tar))
+        batch_sum += nll
+    return batch_sum
+
+
 def get_time_loss(prob_model):
     if prob_model == "beta":
         return masked_beta_nll
@@ -112,6 +156,10 @@ def get_time_loss(prob_model):
         return lambda p, o, m : 0
     elif prob_model == "l1-diou":
         return masked_l1_loss
+    elif prob_model == "sig-log":
+        return masked_sig_log
+    elif prob_model == "sig-norm":
+        return masked_sig_norm
 
 
 def masked_bce_loss(pred, gt, mask):
@@ -152,7 +200,6 @@ def getOptimizerGroup(model, weight_decay):
     noDecay = set(noDecay)
     noDecay = [param for param in model.parameters() if param in noDecay]
 
-
     optimizerConfig = [{"params": otherParams, "weight_decay":weight_decay},
                         {"params": noDecay, "weight_decay":0e-7}]
 
@@ -181,7 +228,7 @@ def config():
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
-          learning_rate, warmup_steps, mix_k, ss_epsilon,
+          learning_rate, warmup_steps, mix_k, ss_epsilon, total_steps,
           clip_gradient_norm, epochs, data_path, self_critical,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, enable_encoder, scheduled_sampling_step,
@@ -234,7 +281,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         rectify=True
     )
 
-    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, 500000, pct_start=0.01, cycle_momentum=False, final_div_factor=2, div_factor = 20)
+    lrScheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, learning_rate, total_steps, pct_start=warmup_steps/total_steps, cycle_momentum=False, final_div_factor=2, div_factor = 20)
 
     step = 0
     max_pitch_prec = 0
@@ -267,15 +314,15 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             dur_i, dur_o = patch_trg(dur)
 
             optimizer.zero_grad()
-            if self_critical:
+            if scst and step < scst_step:
                 model.eval()
                 with torch.no_grad():
-                    greedy = # model sample greedy
+                    greedy = model.sample(mel, "greedy") # model sample greedy
                 model.train()
-                gen, probs = # model sample
+                gen, probs = model.sample(mel, "sample") # model sample
                 
             else:
-                if not scheduled_sampling or step < scheduled_sampling_step:
+                if (not scheduled_sampling or step < scheduled_sampling_step):
                     result = model(mel, pitch_i, start_i, dur_i, voice_i)
                 else:
                     mel = model.encode(mel)

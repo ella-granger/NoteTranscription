@@ -145,11 +145,9 @@ class NoteTransformer(nn.Module):
         # self.trg_start_prj = nn.Linear(d_model // 8, 1)
         # self.trg_dur_prj = nn.Linear(d_model // 8, 1)
         # self.trg_pitch_prj = nn.Linear(d_model * 3 // 4, PAD_IDX+1)
-        if prob_model in ["gaussian", "beta"]:
+        if prob_model in ["gaussian", "beta", "sig-log", "sig-norm"]:
             # self.trg_start_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
             # self.trg_dur_prj = nn.Linear(d_model // 8 // len(train_mode), 2) # mu, std
-            self.trg_start_prj = nn.Linear(d_model, 2)
-            self.trg_dur_prj = nn.Linear(d_model, 2)
 
             self.trg_start_prj = MLP(d_model, [d_model // 2, d_model // 4, 2])
             self.trg_dur_prj = MLP(d_model, [d_model // 2, d_model // 4, 2])
@@ -199,9 +197,10 @@ class NoteTransformer(nn.Module):
 
         start_out = self.trg_start_prj(dec)
         dur_out = self.trg_dur_prj(dec)
-        
-        start_out = F.sigmoid(start_out)
-        dur_out = F.sigmoid(dur_out)
+
+        if self.prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
+            start_out = F.sigmoid(start_out)
+            dur_out = F.sigmoid(dur_out)
 
         result = (pitch_out, start_out, dur_out, voice_out)
 
@@ -288,7 +287,7 @@ class NoteTransformer(nn.Module):
         return trg_seq
 
 
-    def sample(self, mel):
+    def sample(self, mel, mode):
         B = mel.size(0)
         device = mel.devicex
         mel = self.encode(mel, False, False)
@@ -309,7 +308,10 @@ class NoteTransformer(nn.Module):
             trg_seq = self.get_trg_emb(pitch, start, dur, voice)
             pitch_p, start_p, dur_p, voice_p = self.decode(mel, trg_seq, mask)
 
-            
+            if mode == "greedy":
+                
+            else:
+                
 
 
     def predict(self, mel, prev_pitch=None, prev_start=None, prev_dur=None, prev_voice=None, beam_size=2):
