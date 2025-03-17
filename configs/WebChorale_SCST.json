@@ -1,5 +1,5 @@
 {
-    "logdir": "voices/BnNoWD_seg320_layer2_siglog_scst",
+    "logdir": "voices_scst/BnNoWD_seg320_layer2_siglog",
 
     "n_layers": 2,
     "prob_model": "sig-log",
@@ -17,7 +17,7 @@
     "scheduled_sampling": false,
     "scheduled_sampling_step": 200000,
     "scst": true,
-    "scst_step": 20000,
+    "scst_step": 30000,
     "ss_epsilon": 0.75,
 
     "data_path": "./dataset/YouChorale"

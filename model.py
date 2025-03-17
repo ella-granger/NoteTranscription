@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchinfo import summary
+from torch.distributions.categorical import Categorical
+from torch.distributions.bernoulli import Bernoulli
+from utils import *
 import numpy as np
 from torchvision.ops import MLP
 from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_mask
@@ -201,6 +204,9 @@ class NoteTransformer(nn.Module):
         if self.prob_model in ["l1", "l2", "diou", "gaussian-mu", "l1-diou"]:
             start_out = F.sigmoid(start_out)
             dur_out = F.sigmoid(dur_out)
+        if self.prob_model in ["sig-log", "sig-norm"]:
+            start_out[:, :, 1] = F.sigmoid(start_out[:, :, 1])
+            dur_out[:, :, 1] = F.sigmoid(dur_out[:, :, 1])
 
         result = (pitch_out, start_out, dur_out, voice_out)
 
@@ -289,28 +295,89 @@ class NoteTransformer(nn.Module):
 
     def sample(self, mel, mode):
         B = mel.size(0)
-        device = mel.devicex
+        device = mel.device
         mel = self.encode(mel, False, False)
 
         MAX_LEN = 200
-        pitch = torch.zeros((B, MAX_LEN), dtype=int).to(device)
-        voice = torch.zeros((B, MAX_LEN), dypte=int).to(device)
-        start = torch.zeros((B, MAX_LEN, 1), dtype=torch.float64).to(device)
-        dur = torch.zeros((B, MAX_LEN, 1), dtype=torch.float64).to(device)
+        pitch = torch.ones((B, MAX_LEN), dtype=int).to(device) * PAD_IDX
+        voice = torch.zeros((B, MAX_LEN, 4), dtype=torch.float32).to(device)
+        start = torch.zeros((B, MAX_LEN, 1), dtype=torch.float32).to(device)
+        dur = torch.zeros((B, MAX_LEN, 1), dtype=torch.float32).to(device)
+        ll_total = torch.zeros(B, dtype=torch.float32).to(device)
         
         mask = torch.zeros((B, 1, MAX_LEN), dtype=bool).to(device)
         pitch[:, 0] = INI_IDX
-        voice[:, 0] = 4
 
+        gen_mask = torch.ones(B, dtype=bool).to(device)
         for i in range(MAX_LEN-1):
             mask[:, :, i] = True
 
-            trg_seq = self.get_trg_emb(pitch, start, dur, voice)
-            pitch_p, start_p, dur_p, voice_p = self.decode(mel, trg_seq, mask)
+            trg_seq = self.get_trg_emb(pitch[gen_mask], start[gen_mask], dur[gen_mask], voice[gen_mask])
+            pitch_p, start_p, dur_p, voice_p = self.decode(mel[gen_mask], trg_seq, mask[gen_mask])
 
+            # print(pitch_p.size())
+            # print(start_p.size())
+            # print(dur_p.size())
+            # print(voice_p.size())
             if mode == "greedy":
-                
+                # print("GREEDY")
+                pitch[gen_mask, i+1] = torch.argmax(pitch_p[:, i], dim=-1)
+                # print(pitch[:, :i+2])
+                # print(voice_p[:, i])
+                voice[gen_mask, i+1] = (voice_p[:, i] > 0.5).float()
+                # print(voice[:, :i+2])
+                start[gen_mask, i+1, 0] = F.sigmoid(start_p[:, i, 0])
+                dur[gen_mask, i+1, 0] = F.sigmoid(dur_p[:, i, 0])
+                # print(start[:, :i+2])
+                # print(dur[:, :i+2])
+                # _ = input()
             else:
+                # print("SAMPLE")
+                pitch_dist = Categorical(logits=pitch_p[:, i])
+                pitch_s = pitch_dist.sample()
+                pitch_ll = pitch_dist.log_prob(pitch_s)
+                pitch[gen_mask, i+1] = pitch_s
+                # print(pitch[:, :i+2])
+
+                voice_dist = Bernoulli(voice_p[:, i])
+                voice_s = voice_dist.sample()
+                voice_ll = voice_dist.log_prob(voice_s)
+                voice[gen_mask, i+1] = voice_s
+
+                if self.prob_model == "sig-log":
+                    start_dist = build_sigmoid_logistics(start_p[:, i, 0], start_p[:, i, 1])
+                    dur_dist = build_sigmoid_logistics(dur_p[:, i, 0], dur_p[:, i, 1])
+                elif self.prob_model == "sig-norm":
+                    start_dist = build_sigmoid_norm(start_p[:, i, 0], start_p[:, i, 1])
+                    dur_dist = build_sigmoid_norm(dur_p[:, i, 0], dur_p[:, i, 1])
+                start_s = start_dist.sample()
+                start_ll = start_dist.log_prob(start_s)
+                start[gen_mask, i+1, 0] = start_s
+
+                dur_s = dur_dist.sample()
+                dur_ll = dur_dist.log_prob(dur_s)
+                dur[gen_mask, i+1, 0] = dur_s
+
+                ll = pitch_ll + voice_ll.sum(dim=-1) + start_ll + dur_ll
+                # print(ll)
+                ll_total[gen_mask] += ll
+                # _ = input()
+
+            gen_mask = gen_mask & (pitch[:, i+1] != EOS_IDX)
+            # print(gen_mask)
+            # _ = input()
+            if not gen_mask.any():
+                break
+        # print(pitch)
+        # print(voice)
+        # print(start)
+        # print(dur)
+        result = (pitch, voice, start, dur)
+        # _ = input()
+        if mode == "greedy":
+            return result
+        elif mode == "sample":
+            return result, ll_total
                 
 
 

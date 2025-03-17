@@ -160,7 +160,8 @@ class MelDataset(torch.utils.data.Dataset):
             start = (start - begin_time) / (end_time - begin_time)
             end = (end - begin_time) / (end_time - begin_time)
 
-            dur = end - start
+            # dur = end - start
+            dur = end
 
         return dict(mel=mel,
                     pitch=token,

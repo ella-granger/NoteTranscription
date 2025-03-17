@@ -12,11 +12,6 @@ from torch.distributions.beta import Beta
 import torchaudio
 import torch_optimizer as optim
 
-from torch.distributions.normal import Normal
-from torch.distributions.uniform import Uniform
-from torch.distributions.transforms import SigmoidTransform, AffineTransform
-from torch.distributions.transformed_distribution import TransformedDistribution
-
 import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
@@ -105,28 +100,19 @@ def masked_l1_loss(pred, gt, mask):
     return loss
 
 
-def build_sigmoid_logistics(mu, sigma):
-    uni = Uniform(0, 1)
-    trans = [SigmoidTransform().inv, AffineTransform(mu, sigma), SigmoidTransform()]
-    return TransformedDistribution(uni, trans)
-
-
 def masked_sig_log(pred, gt, mask):
     batch_sum = 0
     for i in range(gt.size(0)):
         mu = pred[i, :, 0][mask[i]]
         sigma = pred[i, :, 1][mask[i]]
+        # print("mu:", mu)
+        # print("sigma:", sigma)
         dist = build_sigmoid_logistics(mu, sigma)
         tar = gt[i, :][mask[i]]
+        # print("target:", tar)
         nll = torch.sum(-dist.log_prob(tar))
         batch_sum += nll
     return batch_sum
-
-
-def build_sigmoid_gaussian(mu, sigma):
-    norm = Normal(mu, sigma)
-    trans = [SigmoidTransform()]
-    return TransformedDistribution(norm, trans)
 
 
 def masked_sig_norm(pred, gt, mask):
@@ -134,7 +120,7 @@ def masked_sig_norm(pred, gt, mask):
     for i in range(gt.size(0)):
         mu = pred[i, :, 0][mask[i]]
         sigma = pred[i, :, 1][mask[i]]
-        dist = build_sigmoid_gaussian(mu, sigma)
+        dist = build_sigmoid_norm(mu, sigma)
         tar = gt[i, :][mask[i]]
         nll = torch.sum(-dist.log_prob(tar))
         batch_sum += nll
@@ -223,13 +209,13 @@ def config():
     time_lambda = 3
     enable_encoder = True
     scheduled_sampling = False
-    self_critical = False
+    scst = False
 
 
 @ex.automain
 def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, warmup_steps, mix_k, ss_epsilon, total_steps,
-          clip_gradient_norm, epochs, data_path, self_critical,
+          clip_gradient_norm, epochs, data_path, scst, scst_step,
           output_interval, summary_interval, val_interval,
           loss_norm, time_loss_alpha, enable_encoder, scheduled_sampling_step,
           scheduled_sampling, prob_model, seg_len, time_lambda):
@@ -314,13 +300,16 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             dur_i, dur_o = patch_trg(dur)
 
             optimizer.zero_grad()
-            if scst and step < scst_step:
+            if scst and step >= scst_step:
+                gt = (pitch_o, voice_o, start_o, dur_o)
                 model.eval()
                 with torch.no_grad():
                     greedy = model.sample(mel, "greedy") # model sample greedy
                 model.train()
-                gen, probs = model.sample(mel, "sample") # model sample
-                
+                gen, ll = model.sample(mel, "sample") # model sample
+                r = cal_reward(gen, gt) - cal_reward(greedy, gt)
+                loss = - torch.sum(r * ll)
+                # _ = input()
             else:
                 if (not scheduled_sampling or step < scheduled_sampling_step):
                     result = model(mel, pitch_i, start_i, dur_i, voice_i)
@@ -343,7 +332,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                 seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
                 voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
+                # print("START")
                 start_loss = time_loss(start_p, start_o, seq_mask)
+                # print("END")
                 dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
                 diou_loss = 0  
@@ -357,11 +348,11 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             lrScheduler.step()
 
             if step % output_interval == 0:
-                itr.set_description("pitch: %.2f" % (pitch_loss.item()))
+                itr.set_description("loss: %.2f" % (loss.item()))
 
             if step % summary_interval == 0:
-                if self_critical:
-                    we
+                if scst and step >= scst_step:
+                    sw.add_scalar("training/scst_loss", loss.item(), step)
                 else:
                     sw.add_scalar("training/loss", loss.item(), step)
                     sw.add_scalar("training/pitch_loss", pitch_loss.item(), step)
@@ -376,7 +367,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
                         sw.add_scalar("training/scheduled_sampling_t", t, step)
 
-            if step % val_interval == 0:
+            if step % val_interval == 0 and step != 0:
                 model.eval()
                 with torch.no_grad():
                     total_loss = 0
@@ -457,7 +448,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             for a_i, attn in enumerate(dec_enc_attn):
                                 sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            pred_list = get_list_t(pitch_p, start_p, dur_p, voice_p, mode=prob_model)
+                            pred_list = get_list_t(pitch_p, F.sigmoid(start_p), F.sigmoid(dur_p), voice_p, mode=prob_model)
                             gt_list = get_list_t(pitch_o, start_o, dur_o, voice_o, mode=prob_model)
 
                             sw.add_text("t/%d/gt" % i, str(gt_list), step)
