@@ -2,7 +2,7 @@
   "batch_size": 32,
   "checkpoint_interval": 5000,
   "clip_gradient_norm": false,
-  "data_path": "./dataset/YouChorale",
+  "data_path": "./dataset/YouChorale_bm",
   "device": "cuda",
   "enable_encoder": true,
   "end_ar": true,
@@ -26,7 +26,7 @@
   "summary_interval": 20,
   "time_lambda": 0.1,
   "time_prj": true,
-  "total_steps": 1000000,
+  "total_steps": 500000,
   "val_interval": 1000,
   "warmup_steps": 5000
 }

@@ -28,12 +28,16 @@ def get_trg_mask(pitch):
 
 class TimeEncoding(nn.Module):
 
-    def __init__(self, d_hid, d_model, seg_len):
+    def __init__(self, d_hid, d_model, seg_len, prj=False):
         super(TimeEncoding, self).__init__()
 
         self.d_hid = d_hid
         self.d_model = d_model
         self.seg_len = seg_len
+
+        self.prj = None
+        if prj:
+            self.prj = nn.Linear(d_hid, d_hid)
 
 
     def forward(self, x):
@@ -49,6 +53,9 @@ class TimeEncoding(nn.Module):
 
         enc[:, :, 0::2] = torch.sin(enc[:, :, 0::2])
         enc[:, :, 1::2] = torch.cos(enc[:, :, 1::2])
+
+        if self.prj is not None:
+            enc = self.prj(enc)
 
         return enc
 
@@ -95,13 +102,14 @@ class ConvStack(nn.Module):
 
 class NoteTransformer(nn.Module):
 
-    def __init__(self, kernel_size, d_model, d_inner, n_layers, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian"):
+    def __init__(self, kernel_size, d_model, d_inner, n_layers, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian", time_prj=False, end_ar=True):
         super(NoteTransformer, self).__init__()
 
         self.alpha = alpha
         self.enable_encoder = enable_encoder
         self.prob_model = prob_model
         self.seg_len = seg_len
+        self.end_ar = end_ar
 
         # ConvNet
         # """
@@ -132,8 +140,9 @@ class NoteTransformer(nn.Module):
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model, padding_idx=PAD_IDX)
         self.trg_voice_emb = nn.Linear(4, d_model)
-        self.start_prj = TimeEncoding(d_model, d_model, seg_len)
-        self.dur_prj = TimeEncoding(d_model, d_model, seg_len)
+        self.start_prj = TimeEncoding(d_model, d_model, seg_len, time_prj)
+        if self.end_ar:
+            self.dur_prj = TimeEncoding(d_model, d_model, seg_len, time_prj)
         
         self.decoder = Decoder(d_word_vec=d_model,
                                n_layers=n_layers,
@@ -224,12 +233,15 @@ class NoteTransformer(nn.Module):
         # print(start.size())
         # print(dur.size())
         start = self.start_prj(start)
-        dur = self.dur_prj(dur)
+        if self.end_ar:
+            dur = self.dur_prj(dur)
         
         pitch = self.trg_pitch_emb(pitch)
         voice = self.trg_voice_emb(voice)
 
-        trg_seq = pitch + start + dur + voice
+        trg_seq = pitch + start + voice
+        if self.end_ar:
+            trg_seq += dur
 
         return trg_seq
 
@@ -293,12 +305,13 @@ class NoteTransformer(nn.Module):
         return trg_seq
 
 
-    def sample(self, mel, mode):
+    def sample(self, mel, mode, time_lambda=1.0):
         B = mel.size(0)
         device = mel.device
         mel = self.encode(mel, False, False)
 
         MAX_LEN = 200
+        cut = MAX_LEN
         pitch = torch.ones((B, MAX_LEN), dtype=int).to(device) * PAD_IDX
         voice = torch.zeros((B, MAX_LEN, 4), dtype=torch.float32).to(device)
         start = torch.zeros((B, MAX_LEN, 1), dtype=torch.float32).to(device)
@@ -309,11 +322,20 @@ class NoteTransformer(nn.Module):
         pitch[:, 0] = INI_IDX
 
         gen_mask = torch.ones(B, dtype=bool).to(device)
+        # pitch_list = []
+        # start_list = []
+        # dur_list = []
+        # voice_list = []
         for i in range(MAX_LEN-1):
             mask[:, :, i] = True
 
             trg_seq = self.get_trg_emb(pitch[gen_mask], start[gen_mask], dur[gen_mask], voice[gen_mask])
             pitch_p, start_p, dur_p, voice_p = self.decode(mel[gen_mask], trg_seq, mask[gen_mask])
+            # print(pitch_p.shape)
+            # pitch_list.append(pitch_p[:, i].clone().detach())
+            # start_list.append(start_p[:, i].clone().detach())
+            # dur_list.append(dur_p[:, i].clone().detach())
+            # voice_list.append(voice_p[:, i].clone().detach())
 
             # print(pitch_p.size())
             # print(start_p.size())
@@ -358,7 +380,7 @@ class NoteTransformer(nn.Module):
                 dur_ll = dur_dist.log_prob(dur_s)
                 dur[gen_mask, i+1, 0] = dur_s
 
-                ll = pitch_ll + voice_ll.sum(dim=-1) + start_ll + dur_ll
+                ll = pitch_ll + voice_ll.sum(dim=-1) + time_lambda * (start_ll + dur_ll)
                 # print(ll)
                 ll_total[gen_mask] += ll
                 # _ = input()
@@ -367,17 +389,34 @@ class NoteTransformer(nn.Module):
             # print(gen_mask)
             # _ = input()
             if not gen_mask.any():
+                cut = i + 2
                 break
         # print(pitch)
         # print(voice)
         # print(start)
         # print(dur)
+        # pitch_list = F.softmax(torch.cat(pitch_list, dim=0), dim=1)
+        # print(pitch_list.shape)
+        # voice_list = torch.cat(voice_list, dim=0)
+        # print(voice_list.shape)
+        # start_list = torch.cat(start_list, dim=0)
+        # print(start_list.shape)
+        # dur_list = torch.cat(dur_list, dim=0)
+        # print(dur_list.shape)
+        # raw_p = (pitch_list, voice_list, start_list, dur_list)
+        pitch = pitch[:, 1:cut]
+        voice = voice[:, 1:cut]
+        start = start[:, 1:cut]
+        dur = dur[:, 1:cut]
         result = (pitch, voice, start, dur)
         # _ = input()
         if mode == "greedy":
-            return result
+            # print(pitch)
+            # print(start)
+            # _ = input()
+            return result # , raw_p
         elif mode == "sample":
-            return result, ll_total
+            return result, ll_total # , raw_p
                 
 
 

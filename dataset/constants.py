@@ -11,6 +11,11 @@ MIN_MIDI = 34
 MAX_MIDI = 89
 
 MRK_IDX = MAX_MIDI - MIN_MIDI + 1
+
+######
+# N_MELS = MRK_IDX
+######
+
 INI_IDX = MRK_IDX
 EOS_IDX = MRK_IDX + 1
 PAD_IDX = MRK_IDX + 2

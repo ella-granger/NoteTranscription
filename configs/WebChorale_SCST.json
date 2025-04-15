@@ -1,7 +1,7 @@
 {
-    "logdir": "voices_scst/BnNoWD_seg320_layer2_siglog",
+    "logdir": "voices_scst_tune/BnNoWD_seg320_layer4_siglog",
 
-    "n_layers": 2,
+    "n_layers": 4,
     "prob_model": "sig-log",
     "seg_len": 320,
 
@@ -12,12 +12,12 @@
     "total_steps": 1000000,
     "clip_gradient_norm": false,
     "epochs": 20000,
-    "time_loss_alpha": 1,
+    "time_lambda": 0.1,
     "enable_encoder": true,
     "scheduled_sampling": false,
     "scheduled_sampling_step": 200000,
     "scst": true,
-    "scst_step": 30000,
+    "scst_step": 50000,
     "ss_epsilon": 0.75,
 
     "data_path": "./dataset/YouChorale"

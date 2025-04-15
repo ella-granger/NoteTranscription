@@ -11,7 +11,7 @@ from dataset.constants import *
 from mir_eval.transcription import precision_recall_f1_overlap as evaluate_notes
 from mir_eval.util import midi_to_hz
 
-def mask_out_seq(p, s, e, v=None):
+def mask_out_seq(p, s, e, v=None, print_flag=False):
     mask = (p < INI_IDX)
     scaling = HOP_LENGTH / SAMPLE_RATE * SEG_LEN
 
@@ -20,6 +20,10 @@ def mask_out_seq(p, s, e, v=None):
     e = e[mask]
     
     if v is not None:
+        # print(p)
+        # print(s)
+        # print(e)
+        # print(v)
         p_list = []
         itv_list = []
         for i, v_mask in enumerate(v):
@@ -29,7 +33,7 @@ def mask_out_seq(p, s, e, v=None):
             if v_mask.sum() == 0:
                 continue
             # print(p)
-            print(p[v_mask])
+            # print(p[v_mask])
             p_v = midi_to_hz(p[v_mask] + i * 0.25 + INI_IDX)
             s_v = s[v_mask] * scaling
             e_v = e[v_mask] * scaling
@@ -44,13 +48,18 @@ def mask_out_seq(p, s, e, v=None):
             # print(p_v.shape)
             # print(itv.shape)
             # _ = input()
+        if len(p_list) == 0:
+            return np.array([]), np.array([])
         p = np.concatenate(p_list)
         itv = np.concatenate(itv_list)
 
-        print(p)
-        print(itv)
+        # print(p)
+        # print(itv)
         # _ = input()
         return p, itv
+
+    if print_flag:
+        print(p)
 
     p = midi_to_hz(p + INI_IDX)
     s = s * scaling
@@ -61,14 +70,14 @@ def mask_out_seq(p, s, e, v=None):
     p = p[valid_mask]
     itv = itv[valid_mask]
     
-    print("MASKED SEQ")
-    print(p)
-    print(itv)
+    # print("MASKED SEQ")
+    # print(p)
+    # print(itv)
 
     return p, itv
 
 
-def cal_reward(pred, gt):
+def cal_reward(pred, gt, print_flag=False):
     pitch_p, voice_p, start_p, end_p = pred
     pitch, voice, start, end = gt
     B = pitch_p.size(0)
@@ -85,18 +94,28 @@ def cal_reward(pred, gt):
         s_p = start_p[i].detach().cpu().numpy().T[0]
         e_p = end_p[i].detach().cpu().numpy().T[0]
 
-        p_m, i_m = mask_out_seq(p, s, e)
-        p_p_m, i_p_m = mask_out_seq(p_p, s_p, e_p)
+        p_m, i_m = mask_out_seq(p, s, e, print_flag=print_flag)
+        p_p_m, i_p_m = mask_out_seq(p_p, s_p, e_p, print_flag=print_flag)
 
-        _, _, o_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=None, pitch_tolerance=10.0, onset_tolerance=0.05)
-        _, _, n_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=1.0, pitch_tolerance=10.0, onset_tolerance=0.05)
+        if len(p_m) == 0 or len(p_p_m) == 0:
+            o_f = 0.0
+            n_f = 0.0
+        else:
+            _, _, o_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=None, pitch_tolerance=10.0, onset_tolerance=0.05)
+            _, _, n_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=1.0, pitch_tolerance=10.0, onset_tolerance=0.05)
 
+        # """
         p_m, i_m = mask_out_seq(p, s, e, v)
         p_p_m, i_p_m = mask_out_seq(p_p, s_p, e_p, v_p)
 
-        _, _, vo_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=None, pitch_tolerance=10.0, onset_tolerance=0.05)
-        _, _, vn_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=1.0, pitch_tolerance=10.0, onset_tolerance=0.05)
-
+        if len(p_m) == 0 or len(p_p_m) == 0:
+            vo_f = 0.0
+            vn_f = 0.0
+        else:
+            _, _, vo_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=None, pitch_tolerance=10.0, onset_tolerance=0.05)
+            _, _, vn_f, _ = evaluate_notes(i_m, p_m, i_p_m, p_p_m, offset_ratio=1.0, pitch_tolerance=10.0, onset_tolerance=0.05)
+        # """
+        
         r = o_f + n_f + vo_f + vn_f
         r_list.append(r)
 
@@ -146,6 +165,7 @@ def plot_midi(note_list):
     fig, ax = plt.subplots(figsize=(10, 4))
     colors = ["red", "yellow", "green", "blue", "black"]
     for n, s, e, v in note_list:
+        # print(n, s, e, v)
         if s <= e:
             ax.hlines(n, s, e, colors[v], linewidths=3, alpha=0.4)
 
@@ -212,6 +232,10 @@ def get_list_t(pitch, start, dur, voice, mode="gaussian"):
     dur = dur.detach().cpu().numpy()[0]
     voice = voice.detach().cpu().numpy()[0]
 
+    # print(pitch.shape)
+    # print(start.shape)
+    # _ = input()
+
     if len(pitch.shape) > 1:
         pitch = np.argmax(pitch, axis=1, keepdims=False)
         if mode in ["gaussian", "l2", "l1", "diou", "gaussian-mu", "l1-diou", "sig-log", "sig-norm"]:
@@ -227,7 +251,7 @@ def get_list_t(pitch, start, dur, voice, mode="gaussian"):
         for j in range(voice.shape[-1]):
             if voice[i, j]:
                 note_list.append((pitch[i], start[i], dur[i], j))
-            if sum(voice[i]) == 0:
-                note_list.append((pitch[i], start[i], dur[i], 4))
+        if sum(voice[i]) == 0:
+            note_list.append((pitch[i], start[i], dur[i], 4))
 
     return note_list

@@ -170,21 +170,28 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
 @ex.config
 def cfg():
     # ckpt_id = "00120000"
-    ckpt_id = "best"
+    ckpt_id = "best_00510600"
     # ckpt_id = "cur"
     mix_k = 0
     ss_epsilon = 0
     epsilon = 0
     seg_len = SEG_LEN
     time_lambda = 3
+    enable_encoder = True
+    scheduled_sampling = False
+    scst = False
+    time_prj = False
+    end_ar = True
 
 
 @ex.automain
-def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, ss_epsilon, epsilon,
-        checkpoint_interval, batch_size, learning_rate, warmup_steps,
-        clip_gradient_norm, epochs, output_interval, summary_interval,
-         val_interval, loss_norm, time_loss_alpha, enable_encoder,
-         scheduled_sampling, prob_model, seg_len, time_lambda, scheduled_sampling_step):
+def test(logdir, device, n_layers, checkpoint_interval, batch_size,
+          learning_rate, warmup_steps, mix_k, ss_epsilon, total_steps,
+          clip_gradient_norm, epochs, data_path, scst, scst_step,
+          output_interval, summary_interval, val_interval, ckpt_id,
+          loss_norm, enable_encoder, scheduled_sampling_step,
+          scheduled_sampling, prob_model, seg_len, time_lambda,
+          time_prj, end_ar):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
@@ -211,7 +218,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, ss_epsilon, epsilo
     ckpt_path = logdir / "ckpt" / ckpt_id
     ckpt_dict = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt_dict["model"])
-    model = model.double()
+    model = model # .double()
 
     loader = DataLoader(test_data, 1, shuffle=False, drop_last=False)
 
@@ -222,7 +229,7 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, ss_epsilon, epsilo
         on_c = 0
         off_c = 0
         for i, x in tqdm(enumerate(loader)):
-            mel = x["mel"].to(device).double()
+            mel = x["mel"].to(device)#.double()
             pitch = x["pitch"]
             pitch = pitch[:, 1:-1]
             voice = x["voice"]
@@ -245,15 +252,17 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, ss_epsilon, epsilo
             print(fid, begin_time, end_time)
             # _ = input()
 
-            tf = model(mel, x["pitch"].to(device)[:, :-1], x["start"].to(device)[:, :-1], x["dur"].to(device)[:, :-1], x["voice"].to(device)[:, :-1].double())
-            tf_p, tf_start, tf_end, tf_voice = tf
-            tf_p = torch.argmax(tf_p, dim=-1)
-            print(tf_p)
-            print(tf_start.reshape(1, -1))
-            print(tf_end.reshape(1, -1))
-            result = model.predict(mel, beam_size=4)
+            # tf = model(mel, x["pitch"].to(device)[:, :-1], x["start"].to(device)[:, :-1], x["dur"].to(device)[:, :-1], x["voice"].to(device)[:, :-1].double())
+            # tf_p, tf_start, tf_end, tf_voice = tf
+            # tf_p = torch.argmax(tf_p, dim=-1)
+            # print(tf_p)
+            # print(tf_start.reshape(1, -1))
+            # print(tf_end.reshape(1, -1))
+            # result = model.predict(mel, beam_size=4)
+            result = model.sample(mel, "greedy")
+            pitch_p, voice_p, start_p, end_p = result
 
-            pitch_p, start_p, dur_p, voice_p = result
+            # pitch_p, start_p, dur_p, voice_p = result
 
             length = pitch_p.size(1)
             # if length > 200:
@@ -267,13 +276,32 @@ def test(logdir, device, data_path, n_layers, ckpt_id, mix_k, ss_epsilon, epsilo
             # print(start_t)
             print(pitch_p)
             print(start_p)
-            print(dur_p)
-            end_p = start_p + dur_p
+            print(end_p)
+            print(pitch_p.size())
+            print(start_p.size())
+
+            pitch_p = pitch_p[:, :-1]
+            start_p = start_p[:, :-1, 0]
+            end_p = end_p[:, :-1, 0]
+            # end_p = start_p + dur_p
             # _ = input()
             # print(start_t_p)
             # print(end_p)
-            end_p = torch.clamp(end_p, 1e-4, 1.0)
+            # end_p = torch.clamp(end_p, 1e-4, 1.0)
             dur_p = end_p - start_p
+
+            valid_map = (dur_p > 0)
+            print(valid_map)
+            print(valid_map.size())
+
+            pitch_p = pitch_p[valid_map].unsqueeze(0)
+            start_p = start_p[valid_map].unsqueeze(0)
+            dur_p = dur_p[valid_map].unsqueeze(0)
+
+            # print(pitch_p)
+            # print(start_p)
+            # print(dur_p)
+            # _ = input()
             # print("------")
             # _ = input()
 

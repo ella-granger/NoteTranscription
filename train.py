@@ -23,6 +23,7 @@ from tqdm import tqdm
 from dataset.constants import *
 from utils import *
 import torch.multiprocessing as mp
+import time
 mp.set_start_method("fork", force=True)
 
 
@@ -31,7 +32,7 @@ ex = Experiment("train_transcriber")
 
 def patch_trg(trg):
     gold = trg[:, 1:].contiguous()
-    trg = trg[:, :-1]
+    trg = trg[:, :-1].clone()
     return trg, gold
 
 
@@ -210,6 +211,9 @@ def config():
     enable_encoder = True
     scheduled_sampling = False
     scst = False
+    time_prj = False
+    end_ar = True
+    jitter_time = False
 
 
 @ex.automain
@@ -217,8 +221,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
           learning_rate, warmup_steps, mix_k, ss_epsilon, total_steps,
           clip_gradient_norm, epochs, data_path, scst, scst_step,
           output_interval, summary_interval, val_interval,
-          loss_norm, time_loss_alpha, enable_encoder, scheduled_sampling_step,
-          scheduled_sampling, prob_model, seg_len, time_lambda):
+          loss_norm, enable_encoder, scheduled_sampling_step,
+          scheduled_sampling, prob_model, seg_len, time_lambda,
+          time_prj, end_ar, jitter_time):
     ex.observers.append(FileStorageObserver.create(logdir))
     sw = SummaryWriter(logdir)
 
@@ -242,8 +247,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=False,
                               collate_fn=train_data.collate_fn, num_workers=16,
                               persistent_workers=True, prefetch_factor=4, pin_memory=True)
-    eval_loader = DataLoader(valid_data, 1, shuffle=False, drop_last=False,
-                             collate_fn=valid_data.collate_fn, num_workers=8, pin_memory=True)
+    if scst:
+        eval_loader = DataLoader(valid_data, batch_size, shuffle=False, drop_last=False,
+                                 collate_fn=valid_data.collate_fn, num_workers=16, pin_memory=True)
+    else:
+        eval_loader = DataLoader(valid_data, 1, shuffle=False, drop_last=False,
+                                 collate_fn=valid_data.collate_fn, num_workers=16, pin_memory=True)
 
     model = NoteTransformer(kernel_size=9,
                             d_model=256,
@@ -251,7 +260,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             n_layers=n_layers,
                             seg_len=seg_len,
                             enable_encoder=enable_encoder,
-                            prob_model=prob_model)
+                            prob_model=prob_model,
+                            time_prj=time_prj,
+                            end_ar=end_ar)
     total_params = sum(p.numel() for p in model.parameters())
     print(total_params)
     # exit()
@@ -271,6 +282,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
 
     step = 0
     max_pitch_prec = 0
+    max_f1_score = 0
     min_pitch_loss = np.inf
     
     ckpt_path = logdir / "ckpt" / "cur"
@@ -279,15 +291,33 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         model.load_state_dict(ckpt_dict["model"])
         step = ckpt_dict["steps"]
         max_pitch_prec = ckpt_dict["max_pitch_prec"]
-        optimizer.load_state_dict(ckpt_dict["optim"])
-        lrScheduler.load_state_dict(ckpt_dict["scheduler"])
+        ckpt_opt = ckpt_dict["optim"]
+        for g in ckpt_opt["param_groups"]:
+            g["max_lr"] = learning_rate
+        print(ckpt_opt)
+        optimizer.load_state_dict(ckpt_opt)
+        ckpt_sche = ckpt_dict["scheduler"]
+        # ckpt_sche["_schedule_phases"][0]["end_lr"] = learning_rate
+        # ckpt_sche["_schedule_phases"][1]["start_lr"] = learning_rate
+        # ckpt_sche["_schedule_phases"][1]["end_lr"] = learning_rate / 40
+        lrScheduler.load_state_dict(ckpt_sche)
+        if "max_f1_score" in ckpt_dict:
+            max_f1_score = ckpt_dict["max_f1_score"]
+        
 
     time_loss = get_time_loss(prob_model)
-    
+
+    start_eval = True
+    # end_flag = False
     model.train()
     for e in range(epochs):
+        # if end_flag:
+        #     break
         itr = tqdm(train_loader)
         for x in itr:
+            # if scst and step > scst_step:
+            #     end_flag = True
+            #     break
             mel = x["mel"].to(device)
             pitch = x["pitch"].to(device)
             voice = x["voice"].to(device)
@@ -299,20 +329,33 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             start_i, start_o = patch_trg(start)
             dur_i, dur_o = patch_trg(dur)
 
+            if jitter_time:
+                start_i += torch.normal(0, 0.2 / (HOP_LENGTH * SEG_LEN/ SAMPLE_RATE), size=start_i.size()).to(device)
+                dur_i += torch.normal(0, 0.2 / (HOP_LENGTH * SEG_LEN/ SAMPLE_RATE), size=start_i.size()).to(device)
+
             optimizer.zero_grad()
-            if scst and step >= scst_step:
+            if scst and step > scst_step:
+                # print("SCST step:", step)
+                # time_1 = time.time()
                 gt = (pitch_o, voice_o, start_o, dur_o)
                 model.eval()
                 with torch.no_grad():
                     greedy = model.sample(mel, "greedy") # model sample greedy
+                # time_2 = time.time()
                 model.train()
-                gen, ll = model.sample(mel, "sample") # model sample
-                r = cal_reward(gen, gt) - cal_reward(greedy, gt)
+                gen, ll = model.sample(mel, "sample", time_lambda=time_lambda) # model sample
+                # time_3 = time.time()
+                print("GEN\tGREEDY")
+                r = cal_reward(gen, gt, False) - cal_reward(greedy, gt, False)
+                print(r)
                 loss = - torch.sum(r * ll)
+                print(ll)
+                # time_4 = time.time()
                 # _ = input()
             else:
                 if (not scheduled_sampling or step < scheduled_sampling_step):
                     result = model(mel, pitch_i, start_i, dur_i, voice_i)
+                    pitch_p, start_p, dur_p, voice_p = result
                 else:
                     mel = model.encode(mel)
                     with torch.no_grad():
@@ -327,7 +370,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     trg_seq = model.get_mix_trg(result, ref, t)
                     result = model.decode(mel, trg_seq, trg_mask)
 
-                pitch_p, start_p, dur_p, voice_p = result
+                    pitch_p, start_p, dur_p, voice_p = result
 
                 pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
                 seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
@@ -344,14 +387,26 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
 
             loss.backward()
+            if scst and step > scst_step:
+                torch.nn.utils.clip_grad_norm(model.parameters(), clip_gradient_norm)
             optimizer.step()
             lrScheduler.step()
+            # time_5 = time.time()
+            # print("Greedy:", time_2 - time_1)
+            # print("Sample:", time_3 - time_2)
+            # print("Reward:", time_4 - time_3)
+            # print("BackP:", time_5 - time_4)
 
             if step % output_interval == 0:
                 itr.set_description("loss: %.2f" % (loss.item()))
+                sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
+                # sw.add_scalar("training/greedy", time_2 - time_1, step)
+                # sw.add_scalar("training/sample", time_3 - time_2, step)
+                # sw.add_scalar("training/reward", time_4 - time_3, step)
+                # sw.add_scalar("training/BackP", time_5 - time_4, step)
 
             if step % summary_interval == 0:
-                if scst and step >= scst_step:
+                if scst and step > scst_step:
                     sw.add_scalar("training/scst_loss", loss.item(), step)
                 else:
                     sw.add_scalar("training/loss", loss.item(), step)
@@ -367,7 +422,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         t = get_mix_t(step, mix_k, ss_epsilon, scheduled_sampling_step)
                         sw.add_scalar("training/scheduled_sampling_t", t, step)
 
-            if step % val_interval == 0 and step != 0:
+            if step % val_interval == 0: #  and step != 0:
+                if not start_eval:
+                    print("Skip this eval")
+                    start_eval = True
+                    step += 1
+                    continue
+                print("Eval")
                 model.eval()
                 with torch.no_grad():
                     total_loss = 0
@@ -382,6 +443,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_dur_T = 0
                     total_C = 0
                     total_voice_C = 0
+                    total_f = 0
                     total_count = 0
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
@@ -399,30 +461,44 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                         start_i, start_o = patch_trg(start)
                         dur_i, dur_o = patch_trg(dur)
 
-                        result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True, return_attns=True)
-                        # result = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True)
-                        mel_result = model.mel_result
-                        enc_result = model.enc_result
-                        pitch_p, start_p, dur_p, voice_p = result
+                        if jitter_time:
+                            start_i += torch.normal(0, 0.075 * HOP_LENGTH * SEG_LEN/ SAMPLE_RATE, size=start_i.size()).to(device)
+                            dur_i += torch.normal(0, 0.075 * HOP_LENGTH * SEG_LEN/ SAMPLE_RATE, size=start_i.size()).to(device)
+                        
+                        if scst and step > scst_step:
+                            result = model.sample(mel, "greedy")
+                            gt = (pitch_o, voice_o, start_o, dur_o)
 
-                        start_loss = 0
-                        dur_loss = 0
-                        diou_loss = 0
-                        pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
-                        seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
-                        voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
-                        start_loss = time_loss(start_p, start_o, seq_mask)
-                        dur_loss = time_loss(dur_p, dur_o, seq_mask)
+                            f1_r = torch.sum(cal_reward(result, gt))
+                            pitch_p, voice_p, start_p, dur_p = result
+                            # print(start_p)
+                            # print(dur_p)
+                            total_count += len(mel)
+                        else:
+                            result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True, return_attns=True)
+                            # result = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True)
+                            # mel_result = model.mel_result
+                            # enc_result = model.enc_result
+                            pitch_p, start_p, dur_p, voice_p = result
 
-                        if "diou" in prob_model:
-                            diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
+                            start_loss = 0
+                            dur_loss = 0
+                            diou_loss = 0
+                            pitch_loss = F.cross_entropy(torch.permute(pitch_p, (0, 2, 1)), pitch_o, ignore_index=PAD_IDX, reduction='sum')
+                            seq_mask = (pitch_o != PAD_IDX) * (pitch_o != 0)
+                            voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
+                            start_loss = time_loss(start_p, start_o, seq_mask)
+                            dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
-                        loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
+                            if "diou" in prob_model:
+                                diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
+
+                            loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
 
                         if i < 1:
                             b = begin_time
                             e = end_time
-                            if data_path.stem == "YouChorale":
+                            if "YouChorale" in data_path.stem:
                                 # WebChorale
                                 audio_path = Path("./dataset/YouChorale/audio_clean")
                             else:
@@ -438,17 +514,21 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_audio("%d" % i, wav, step, sr)
                                 sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
-                            sw.add_figure("cnn_%d" % i, plot_spec(mel_result[0].detach().cpu()), step)
-                            sw.add_figure("enc_%d" % i, plot_spec(enc_result[0].detach().cpu()), step)
-
-
+                            # sw.add_figure("cnn_%d" % i, plot_spec(mel_result[0].detach().cpu()), step)
+                            # sw.add_figure("enc_%d" % i, plot_spec(enc_result[0].detach().cpu()), step)
+                            """
                             for a_i, attn in enumerate(enc_attn):
                                 sw.add_figure("Attn/enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             for a_i, attn in enumerate(dec_self_attn):
                                 sw.add_figure("Attn/dec_self_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             for a_i, attn in enumerate(dec_enc_attn):
                                 sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
-                            pred_list = get_list_t(pitch_p, F.sigmoid(start_p), F.sigmoid(dur_p), voice_p, mode=prob_model)
+                            """
+                            if scst and step > scst_step:
+                                print(start_p.shape)
+                                pred_list = get_list_t(pitch_p, start_p[:, :, 0], dur_p[:, :, 0], voice_p, mode=prob_model)
+                            else:
+                                pred_list = get_list_t(pitch_p, F.sigmoid(start_p), F.sigmoid(dur_p), voice_p, mode=prob_model)
                             gt_list = get_list_t(pitch_o, start_o, dur_o, voice_o, mode=prob_model)
 
                             sw.add_text("t/%d/gt" % i, str(gt_list), step)
@@ -457,40 +537,61 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             sw.add_figure("pred/t_%d" % i, plot_midi(pred_list), step)
                             sw.add_figure("gt/t_%d" % i, plot_midi(gt_list), step)
 
-                        pitch_pred = torch.argmax(pitch_p, dim=-1)
-                        total_T += torch.sum(pitch_pred == pitch_o).item()
-                        total_C += pitch_pred.size(1)
-                        voice_pred = (voice_p > 0.5)
-                        total_voice_T += torch.sum(voice_pred == voice_o).item()
-                        total_voice_C += torch.sum(voice_o).item()
-                        total_loss += loss.item()
-                        total_pitch_loss += pitch_loss.item()
-                        total_voice_loss += voice_loss.item()
-                        if "l1" in prob_model:
-                            total_start_loss += start_loss.item()
-                            total_dur_loss += dur_loss.item()
-                        if "diou" in prob_model:
-                            total_diou_loss += diou_loss.item()
-                        total_count += 1
+                        if scst and step > scst_step:
+                            total_f += f1_r.item()
+                        else:
+                            pitch_pred = torch.argmax(pitch_p, dim=-1)
+                            total_T += torch.sum(pitch_pred == pitch_o).item()
+                            total_C += pitch_pred.size(1)
+                            voice_pred = (voice_p > 0.5)
+                            total_voice_T += torch.sum(voice_pred == voice_o).item()
+                            total_voice_C += torch.sum(voice_o).item()
+                            total_loss += loss.item()
+                            total_pitch_loss += pitch_loss.item()
+                            total_voice_loss += voice_loss.item()
+                            if "l1" in prob_model:
+                                total_start_loss += start_loss.item()
+                                total_dur_loss += dur_loss.item()
+                            if "diou" in prob_model:
+                                total_diou_loss += diou_loss.item()
+                            total_count += len(mel)
 
-                eval_loss = total_loss / total_count
-                eval_pitch_loss = total_pitch_loss / total_count
-                eval_voice_loss = total_voice_loss / total_count
-                sw.add_scalar("eval/loss", eval_loss, step)
-                sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
-                sw.add_scalar("eval/voice_loss", eval_voice_loss, step)
-                if "diou" in prob_model:
-                    eval_diou_loss = total_diou_loss / total_count
-                    sw.add_scalar("eval/diou_loss", eval_diou_loss, step)
-                if "l1" in prob_model:
-                    eval_start_loss = total_start_loss / total_count
-                    eval_dur_loss = total_dur_loss / total_count
-                    sw.add_scalar("eval/start_loss", eval_start_loss, step)
-                    sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
-                sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
-                sw.add_scalar("eval/voice_prec", total_voice_T / total_voice_C, step)
-                print(eval_loss, total_T / total_C)
 
+                if scst and step > scst_step:
+                    eval_f1 = total_f / total_count
+                    sw.add_scalar("eval/f1_all", eval_f1, step)
+                else:
+                    eval_loss = total_loss / total_count
+                    eval_pitch_loss = total_pitch_loss / total_count
+                    eval_voice_loss = total_voice_loss / total_count
+                    sw.add_scalar("eval/loss", eval_loss, step)
+                    sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
+                    sw.add_scalar("eval/voice_loss", eval_voice_loss, step)
+                    if "diou" in prob_model:
+                        eval_diou_loss = total_diou_loss / total_count
+                        sw.add_scalar("eval/diou_loss", eval_diou_loss, step)
+                    if "l1" in prob_model:
+                        eval_start_loss = total_start_loss / total_count
+                        eval_dur_loss = total_dur_loss / total_count
+                        sw.add_scalar("eval/start_loss", eval_start_loss, step)
+                        sw.add_scalar("eval/dur_loss", eval_dur_loss, step)
+                    sw.add_scalar("eval/pitch_prec", total_T / total_C, step)
+                    sw.add_scalar("eval/voice_prec", total_voice_T / total_voice_C, step)
+                    print(eval_loss, total_T / total_C)
+
+                prev_max_pitch = max_pitch_prec
+                prev_max_f1 = max_f1_score
+
+                best_flag = False
+                if scst and step > scst_step:
+                    if eval_f1 > max_f1_score:
+                        best_flag = True
+                        max_f1_score = eval_f1
+                else:
+                    if total_T / total_C > max_pitch_prec:
+                        best_flag = True
+                        max_pitch_prec = total_T / total_C
+                        
                 checkpoint_path = logdir / "ckpt"
                 checkpoint_path.mkdir(exist_ok=True)
                 save_path = checkpoint_path / "cur"
@@ -499,14 +600,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                        "scheduler": lrScheduler.state_dict(),
                        "steps": step,
                        "epoch": e,
-                       "max_pitch_prec": max_pitch_prec}
+                       "max_pitch_prec": max_pitch_prec,
+                       "max_f1_score": max_f1_score}
                 torch.save(obj, str(save_path))
 
-                if total_T / total_C > max_pitch_prec:
-                # if eval_pitch_loss < min_pitch_loss:
-                    max_pitch_prec = total_T / total_C
-                    # min_pitch_loss = eval_pitch_loss
-                    save_path = checkpoint_path / "best"
+                if best_flag:
+                    save_path = checkpoint_path / ("best_%08d" % step)
                     torch.save(obj, str(save_path))
 
                 model.train()

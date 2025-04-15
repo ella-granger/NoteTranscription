@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataset.constants import *
 from math import ceil
 # from constants import *
-
+from tqdm import tqdm
 
 class MelDataset(torch.utils.data.Dataset):
     def __init__(self, mel_dir, note_dir, id_json,
@@ -33,7 +33,7 @@ class MelDataset(torch.utils.data.Dataset):
         self.dataset_len = 0
 
         self.fid_list = []
-        for f in mel_files:
+        for f in tqdm(mel_files):
             if f.stem not in id_list:
                 continue
             self.fid_list.append(f.stem)
@@ -43,7 +43,9 @@ class MelDataset(torch.utils.data.Dataset):
             
             with open(note_dir / ("%s.pkl" % f.stem), "rb") as fin:
                 note = pickle.load(fin)
-            note = self.convert_notelist(note)
+            
+            # note = self.convert_notelist(note)
+            
             self.note_list.append(note)
 
             data_length = self.get_length(mel, note)
