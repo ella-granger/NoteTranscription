@@ -7,7 +7,9 @@ from torch.distributions.bernoulli import Bernoulli
 from utils import *
 import numpy as np
 from torchvision.ops import MLP
-from transformer.Models import Encoder, Decoder, get_pad_mask, get_subsequent_mask
+from transformer.Models import Encoder, Decoder, PositionalEncoding, get_pad_mask, get_subsequent_mask
+from flow import ResidualCouplingBlock
+import monotonic_align
 from dataset.constants import *
 from tqdm import tqdm
 
@@ -100,6 +102,47 @@ class ConvStack(nn.Module):
         return x
 
 
+class SynthEnc(nn.Module):
+
+    def __init__(self, d_model, seg_len=320):
+        super(SynthEnc, self).__init__()
+
+        self.pos = PositionalEncoding(d_model, seg_len)
+
+        self.note_prj = nn.Embedding(MRK_IDX, d_model)
+        self.point_prj = nn.Linear(1, d_model, bias=False)
+        self.voice_prj = nn.Embedding(15, d_model)
+
+        self.mlp = MLP(d_model, [d_model, d_model], dropout=0.1)
+
+    def forward(self, bm):
+        bm = torch.permute(bm, (0, 2, 1, 3))
+        print(bm.size())
+        act = bm[..., :1]
+        point = bm[..., 1:]
+
+        # pitch activation map
+        print(act.size())
+        pitch = (act > 0)
+        table = self.note_prj.weight.unsqueeze(0).unsqueeze(0)
+        print(table.size())
+        pitch = pitch * table # self.note_prj.weight[pitch]
+        print(pitch.size())
+
+        point = self.point_prj(point)
+
+        mask = (act == 0)
+        act_tmp = (act - 1)
+        act_tmp[mask] = 0
+        voice = self.voice_prj(act_tmp)
+        voice[mask] = 0
+
+        feats = pitch + point + voice
+        feats = self.mlp(feats).sum(-1)
+        feats = self.pos(feats)
+        return feats
+
+
 class NoteTransformer(nn.Module):
 
     def __init__(self, kernel_size, d_model, d_inner, n_layers, seg_len=320, enable_encoder=True, alpha=10, prob_model="gaussian", time_prj=False, end_ar=True):
@@ -136,6 +179,7 @@ class NoteTransformer(nn.Module):
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
                                    scale_emb=True)
+        self.enc_prj = nn.Linear(d_model, d_model * 2)
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model, padding_idx=PAD_IDX)
@@ -172,9 +216,13 @@ class NoteTransformer(nn.Module):
             # self.trg_start_prj = nn.Linear(d_model, 1)
             # self.trg_dur_prj = nn.Linear(d_model, 1)
 
+        # SynthEnc
+        self.synth_enc = SynthEnc(d_model, self.seg_len)
+        self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
+
 
     def encode(self, mel, return_attns=False, return_cnn=False):
-        return_attns = return_attns & self.enable_encoder
+        return_attns = return_attns & self.enable_encoder        
         mel = self.cnn(mel)
         if return_cnn:
             self.mel_result = mel
@@ -246,22 +294,37 @@ class NoteTransformer(nn.Module):
         return trg_seq
 
 
-    def forward(self, mel, pitch, start, dur, voice, return_attns=False, return_cnn=False):
+    def forward(self, mel, bm, pitch, start, dur, voice, return_attns=False, return_cnn=False):
+        ######################################
+        bm = self.synth_enc(bm)
+        z = self.flow(bm)
+        ######################################
+        
         if return_attns:
             mel, enc_attn = self.encode(mel, return_attns, return_cnn)
         else:
             mel = self.encode(mel, return_attns, return_cnn)
+
+        dist = self.enc_prj(mel)
+        mu, sig = dist
+
+        with torch.no_grad():
+            # cal neg ll
+            # neg_ll = owiejf
+            attn = monotonic_align.maximum_path(neg_ll, torch.ones_like(neg_ll)).detach()
+
+        z = attn * z
 
         trg_mask = get_trg_mask(pitch)
         trg_seq = self.get_trg_emb(pitch, start, dur, voice)
         
         # return pitch_out, start_out, dur_out
         if return_attns:
-            result, (dec_self_attn, dec_enc_attn) = self.decode(mel, trg_seq, trg_mask, return_attns)
-            return result, (enc_attn, dec_self_attn, dec_enc_attn)
+            result, (dec_self_attn, dec_enc_attn) = self.decode(bm, trg_seq, trg_mask, return_attns)
+            return result, z, mu, sig, (enc_attn, dec_self_attn, dec_enc_attn)
         else:
-            result = self.decode(mel, trg_seq, trg_mask)
-            return result
+            result = self.decode(bm, trg_seq, trg_mask)
+            return result, z, mu, sig
 
 
     def get_mix_emb(self, p, i, emb, mix):

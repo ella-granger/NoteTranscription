@@ -12,7 +12,7 @@ from math import ceil
 from tqdm import tqdm
 
 class MelDataset(torch.utils.data.Dataset):
-    def __init__(self, mel_dir, note_dir, id_json,
+    def __init__(self, mel_dir, note_dir, bm_dir, id_json,
                  seg_len=320, shuffle=True, device="cpu"):
         super().__init__()
 
@@ -25,11 +25,16 @@ class MelDataset(torch.utils.data.Dataset):
         note_dir = Path(note_dir)
         with open(id_json) as fin:
             id_list = json.load(fin)
+
+        print(id_json)
+        print(len(id_list))
         
-        mel_files = list(mel_dir.glob("*.pkl"))
+        mel_files = list(mel_dir.glob("*.pkl"))[:10]
+        print(len(mel_files))
 
         self.mel_list = []
         self.note_list = []
+        self.bm_list = []
         self.dataset_len = 0
 
         self.fid_list = []
@@ -40,11 +45,14 @@ class MelDataset(torch.utils.data.Dataset):
             with open(f, 'rb') as fin:
                 mel = pickle.load(fin)
             self.mel_list.append(mel)
+            with open(bm_dir / ("%s.pkl" % f.stem), "rb") as fin:
+                bm = pickle.load(fin)
+            self.bm_list.append(bm)
             
             with open(note_dir / ("%s.pkl" % f.stem), "rb") as fin:
                 note = pickle.load(fin)
             
-            # note = self.convert_notelist(note)
+            note = self.convert_notelist(note)
             
             self.note_list.append(note)
 
@@ -105,6 +113,7 @@ class MelDataset(torch.utils.data.Dataset):
         index = np.random.randint(len(self.mel_list))
 
         mel = self.mel_list[index]
+        bm = self.bm_list[index]
         note = self.note_list[index]
         fid = self.fid_list[index]
 
@@ -117,6 +126,7 @@ class MelDataset(torch.utils.data.Dataset):
             begin_idx = np.random.randint(total_length - self.seg_len + 1)
             end_idx = begin_idx + self.seg_len
             mel = mel[:, begin_idx:end_idx]
+            bm = bm[:, begin_idx:end_idx]
 
             begin_time = begin_idx * HOP_LENGTH / SAMPLE_RATE
             end_time = end_idx * HOP_LENGTH / SAMPLE_RATE
@@ -166,6 +176,7 @@ class MelDataset(torch.utils.data.Dataset):
             dur = end
 
         return dict(mel=mel,
+                    bm=bm,
                     pitch=token,
                     start=start,
                     dur=dur,
@@ -200,6 +211,7 @@ class MelDataset(torch.utils.data.Dataset):
                 v = pad_and_stack(v, pad_dict[key])
             result[key] = v
         result["mel"] = torch.stack(result["mel"])
+        result["bm"] = torch.stack(result["bm"])
 
         return result
             

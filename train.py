@@ -234,12 +234,14 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     data_path = Path(data_path)
     train_data = MelDataset(data_path / "mel",
                             data_path / "note",
+                            data_path / "bm",
                             data_path / "train.json",
                             seg_len=seg_len,
                             device=device)
 
     valid_data = MelDataset(data_path / "mel",
                             data_path / "note",
+                            data_path / "bm",
                             data_path / "valid.json",
                             seg_len=seg_len,
                             device=device)
@@ -319,6 +321,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             #     end_flag = True
             #     break
             mel = x["mel"].to(device)
+            bm = x["bm"].to(device)
             pitch = x["pitch"].to(device)
             voice = x["voice"].to(device)
             start = x["start"].to(device)
@@ -354,8 +357,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 # _ = input()
             else:
                 if (not scheduled_sampling or step < scheduled_sampling_step):
-                    result = model(mel, pitch_i, start_i, dur_i, voice_i)
+                    result, z, mu, sig = model(mel, bm, pitch_i, start_i, dur_i, voice_i)
                     pitch_p, start_p, dur_p, voice_p = result
+                    _ = input()
                 else:
                     mel = model.encode(mel)
                     with torch.no_grad():
@@ -380,11 +384,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 # print("END")
                 dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
+                enc_loss = nll_loss(z, mu, sig)
+
                 diou_loss = 0  
                 if "diou" in prob_model:
                     diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
 
-                loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
+                loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss) + enc_loss
 
             loss.backward()
             if scst and step > scst_step:
@@ -414,7 +420,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     sw.add_scalar("training/voice_loss", voice_loss.item(), step)
                     if "diou" in prob_model:
                         sw.add_scalar("training/diou_loss", diou_loss.item(), step)
-                    if "f1" in prob_model:
+                    if "f1" in prob_model or "sig-log" in prob_model:
                         sw.add_scalar("training/start_loss", start_loss.item(), step)
                         sw.add_scalar("training/dur_loss", dur_loss.item(), step)
                     sw.add_scalar("training/lr", optimizer.param_groups[0]["lr"], step)
@@ -437,6 +443,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_dur_loss = 0
                     total_diou_loss = 0
                     total_voice_loss = 0
+                    total_enc_loss = 0
                     total_T = 0
                     total_voice_T = 0
                     total_start_T = 0
@@ -447,6 +454,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     total_count = 0
                     for i, batch in tqdm(enumerate(eval_loader)):
                         mel = batch["mel"].to(device)
+                        bm = batch["bm"].to(device)
                         pitch = batch["pitch"].to(device)
                         voice = batch["voice"].to(device)
                         start = batch["start"].to(device)
@@ -475,7 +483,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             # print(dur_p)
                             total_count += len(mel)
                         else:
-                            result, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True, return_attns=True)
+                            result, z, mu, sig, (enc_attn, dec_self_attn, dec_enc_attn) = model(mel, bm, pitch_i, start_i, dur_i, voice_i, return_cnn=True, return_attns=True)
                             # result = model(mel, pitch_i, start_i, dur_i, voice_i, return_cnn=True)
                             # mel_result = model.mel_result
                             # enc_result = model.enc_result
@@ -489,11 +497,12 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
                             start_loss = time_loss(start_p, start_o, seq_mask)
                             dur_loss = time_loss(dur_p, dur_o, seq_mask)
+                            enc_loss = nll_loss(z, mu, sig)
 
                             if "diou" in prob_model:
                                 diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
 
-                            loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss)
+                            loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss) + enc_loss
 
                         if i < 1:
                             b = begin_time
@@ -554,6 +563,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 total_dur_loss += dur_loss.item()
                             if "diou" in prob_model:
                                 total_diou_loss += diou_loss.item()
+                            total_enc_loss += enc_loss.item()
                             total_count += len(mel)
 
 
@@ -564,13 +574,15 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                     eval_loss = total_loss / total_count
                     eval_pitch_loss = total_pitch_loss / total_count
                     eval_voice_loss = total_voice_loss / total_count
+                    eval_enc_loss = total_enc_loss / total_count
                     sw.add_scalar("eval/loss", eval_loss, step)
                     sw.add_scalar("eval/pitch_loss", eval_pitch_loss, step)
                     sw.add_scalar("eval/voice_loss", eval_voice_loss, step)
+                    sw.add_scalar("eval/enc_loss", eval_enc_loss, step)
                     if "diou" in prob_model:
                         eval_diou_loss = total_diou_loss / total_count
                         sw.add_scalar("eval/diou_loss", eval_diou_loss, step)
-                    if "l1" in prob_model:
+                    if "l1" in prob_model or "sig-log" in prob_model:
                         eval_start_loss = total_start_loss / total_count
                         eval_dur_loss = total_dur_loss / total_count
                         sw.add_scalar("eval/start_loss", eval_start_loss, step)

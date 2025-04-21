@@ -1,4 +1,4 @@
-import pretty_midi
+# import pretty_midi
 from pathlib import Path
 import pickle
 from math import floor
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     # target_dir = Path("./test/WebChorale")
     # target_dir = Path("./test/BachChorale")
     
-    mel_dir = target_dir / "mel"
+    mel_dir = target_dir / "mel_focus"
     note_dir = target_dir / "note"
     mel_dir.mkdir(parents=True, exist_ok=True)
     note_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +256,7 @@ if __name__ == "__main__":
     valid = 0
     # for flac in tqdm(flac_list):
     for j, midi_path in tqdm(enumerate(midi_list)):
+        """
         if "aQayyS-N6Tc" in midi_path.stem:
             _ = input()
         if j < 0:
@@ -296,6 +297,8 @@ if __name__ == "__main__":
                                                          hop_length=HOP_LENGTH,
                                                          pad_mode=PAD_MODE,
                                                          n_mels=N_MELS,
+                                                         f_min=50.0,
+                                                         f_max=4000.0,
                                                          norm="slaney")
         mel_spec = trans_mel(wave_mono)
         mel_spec = torch.log(torch.clamp(mel_spec, min=MEL_EPSILON))
@@ -303,12 +306,13 @@ if __name__ == "__main__":
         with open(mel_dir / ("%s.pkl" % flac.stem), 'wb') as fout:
             pickle.dump(mel_spec, fout, protocol=4)
 
-        """
+        # """
 
         # break
         # _ = input()
         
     # print(start_time)
+    """
     start_time_list = [(k ,v) for k, v in start_time.items()]
     start_time_list.sort()
     print(start_time_list)
@@ -318,3 +322,4 @@ if __name__ == "__main__":
     print(duration_list)
     print(sum([x[1] for x in duration_list]))
     print(valid)
+    """
