@@ -293,7 +293,7 @@ class NoteTransformer(nn.Module):
 
         # SynthEnc
         self.synth_enc = SynthEnc(d_model)
-        self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
+        # self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
         self.bm_pos = PositionalEncoding(d_model, self.seg_len)
         # self.enc_prj.weight.data.copy_(torch.eye(self.enc_prj.weight.shape[0]))
         # assert self.enc_prj.weight.shape[0] == self.enc_prj.weight.shape[1]
@@ -380,7 +380,8 @@ class NoteTransformer(nn.Module):
         mask = torch.ones((mel.size(0), 1, mel.size(2))).to(device)
         # Note synthesize and flow
         bm = self.synth_enc(bm) # bm (bsz, pitch_name, length, [0-1 act, onset-offet])
-        z = self.flow(bm, mask) # (B, D, LN)
+        # z = self.flow(bm, mask) # (B, D, LN)
+        z = bm
 
         mel_tmp = get_obj_by_id(ori_id)
         # print("after synth:", mel_tmp.max().item(), mel_tmp.min().item())

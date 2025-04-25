@@ -416,7 +416,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 # print("END")
                 dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
-                enc_loss = nll_norm_loss(z, mu, logs) * 0.01
+                enc_loss = nll_norm_loss(z.detach(), mu, logs) * 0.01
 
                 diou_loss = 0  
                 if "diou" in prob_model:
