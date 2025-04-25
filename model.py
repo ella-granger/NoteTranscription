@@ -8,10 +8,18 @@ from utils import *
 import numpy as np
 from torchvision.ops import MLP
 from transformer.Models import Encoder, Decoder, PositionalEncoding, get_pad_mask, get_subsequent_mask
+import math
 from flow import ResidualCouplingBlock
 import monotonic_align
 from dataset.constants import *
 from tqdm import tqdm
+import gc
+
+def get_obj_by_id(target_id):
+    for obj in gc.get_objects():
+        if id(obj) == target_id:
+            return obj
+    return None
 
 
 def get_mix_mask(pitch, t):
@@ -26,6 +34,15 @@ def get_mix_mask(pitch, t):
 
 def get_trg_mask(pitch):
     return get_pad_mask(pitch, PAD_IDX) & get_subsequent_mask(pitch)
+
+
+class Permute(nn.Module):
+    def __init__(self, *dims):
+        super().__init__()
+        self.dims = dims
+
+    def forward(self, x):
+        return x.permute(*self.dims)
 
 
 class TimeEncoding(nn.Module):
@@ -104,42 +121,82 @@ class ConvStack(nn.Module):
 
 class SynthEnc(nn.Module):
 
-    def __init__(self, d_model, seg_len=320):
+    def __init__(self, d_model):
         super(SynthEnc, self).__init__()
-
-        self.pos = PositionalEncoding(d_model, seg_len)
 
         self.note_prj = nn.Embedding(MRK_IDX, d_model)
         self.point_prj = nn.Linear(1, d_model, bias=False)
         self.voice_prj = nn.Embedding(15, d_model)
 
-        self.mlp = MLP(d_model, [d_model, d_model], dropout=0.1)
+        self.ln = nn.LayerNorm(d_model)
+
+        # self.mlp = MLP(d_model, [d_model], dropout=0.1)
+
+        # self.cnn1 = nn.Conv2d(d_model, d_model, 3, padding=1)
+        # self.ln1 = nn.LayerNorm(d_model)
+
+        # self.cnn2 = nn.Conv2d(MRK_IDX, 1, 1)
+        # self.ln2 = nn.LayerNorm(d_model)
 
     def forward(self, bm):
         bm = torch.permute(bm, (0, 2, 1, 3))
-        print(bm.size())
         act = bm[..., :1]
         point = bm[..., 1:]
 
         # pitch activation map
-        print(act.size())
         pitch = (act > 0)
         table = self.note_prj.weight.unsqueeze(0).unsqueeze(0)
-        print(table.size())
-        pitch = pitch * table # self.note_prj.weight[pitch]
-        print(pitch.size())
+        pitch = pitch * table
 
-        point = self.point_prj(point)
+        self.pitch_ori = torch.sum(pitch, 2)
 
+        point = self.point_prj(point.to(torch.float32))
+        self.point_ori = torch.sum(point, 2)
+
+        act = act[..., 0]
         mask = (act == 0)
+        valid_mask = (act > 0)
         act_tmp = (act - 1)
         act_tmp[mask] = 0
+        # print(act_tmp[valid_mask])
+        # print((act_tmp[valid_mask] == 14).all())
+        # _ = input()
         voice = self.voice_prj(act_tmp)
         voice[mask] = 0
 
-        feats = pitch + point + voice
-        feats = self.mlp(feats).sum(-1)
-        feats = self.pos(feats)
+        self.voice_ori = torch.sum(voice, 2)
+
+        feats = pitch + point + voice / 4 # (B, L, P, D)
+        feats = torch.mean(feats, 2)
+        feats = self.ln(feats)
+
+        # self.feats_ori = feats
+
+        ##############
+        # feats = self.mlp(feats).sum(2)
+        ##############
+        # Mix feats within D
+        """
+        feats = torch.permute(feats, (0, 3, 1, 2)) # (B, D, L, P)
+        feats = self.cnn1(feats)
+        feats = torch.permute(feats, (0, 2, 3, 1)) # (B, L, P, D)
+        feats = F.relu(self.ln1(feats))
+        feats = torch.permute(feats, (0, 3, 1, 2)) # (B, D, L, P)
+        self.feats_D = torch.sum(feats, -1)
+        # Mix feats among P
+        feats = torch.permute(feats, (0, 3, 1, 2)) # (B, P, D, L)
+        feats = self.cnn2(feats).squeeze(1) # (B, 1, D, L) -> (B, D, L)
+        feats = torch.permute(feats, (0, 2, 1)) # (B, L, D)
+        feats = self.ln2(feats)
+        """
+        ##############
+        # self.feats_D = feats.clone()
+        # self.feats_cnn = feats.clone()
+        # feats = self.pos(feats)
+
+        self.feats_final = feats
+
+        feats = torch.permute(feats, (0, 2, 1))
         return feats
 
 
@@ -155,19 +212,37 @@ class NoteTransformer(nn.Module):
         self.end_ar = end_ar
 
         # ConvNet
-        # """
         padding_len = kernel_size // 2
+        # """
         self.cnn = nn.Sequential(
-            nn.Conv1d(N_MELS, d_model, kernel_size, padding=padding_len),
-            nn.BatchNorm1d(d_model),
+            nn.Conv1d(N_MELS, d_model // 2, kernel_size, padding=padding_len),
+            nn.BatchNorm1d(d_model // 2),
             nn.ReLU(),
-            nn.Conv1d(d_model, d_model, kernel_size, padding=padding_len),
+            nn.Conv1d(d_model // 2, d_model // 4, kernel_size, padding=padding_len),
+            nn.BatchNorm1d(d_model // 4),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Conv1d(d_model // 4, d_model // 2, kernel_size, padding=padding_len),
+            nn.BatchNorm1d(d_model // 2),
+            nn.ReLU(),
+            nn.Conv1d(d_model // 2, d_model, kernel_size, padding=padding_len),
             nn.BatchNorm1d(d_model),
             nn.ReLU(),
             nn.Dropout(0.1)
         )
-        # """
         # self.cnn = ConvStack(N_MELS, d_model)
+        """
+        self.cnn = nn.Sequential(
+            nn.Conv1d(N_MELS, d_model, kernel_size, padding=padding_len),
+            nn.BatchNorm1d(d_model),
+            # Permute(0, 2, 1),
+            # nn.LayerNorm(d_model),
+            # Permute(0, 2, 1),
+            # nn.BatchNorm1d(d_model),
+            nn.ReLU(),
+            nn.Dropout(0.1)
+        )
+        """
 
         self.d_model = d_model
         # Encoder
@@ -178,8 +253,8 @@ class NoteTransformer(nn.Module):
                                    d_model=d_model,
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
-                                   scale_emb=True)
-        self.enc_prj = nn.Linear(d_model, d_model * 2)
+                                   scale_emb=False)
+        # self.enc_prj = nn.Linear(d_model, d_model)
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model, padding_idx=PAD_IDX)
@@ -217,15 +292,19 @@ class NoteTransformer(nn.Module):
             # self.trg_dur_prj = nn.Linear(d_model, 1)
 
         # SynthEnc
-        self.synth_enc = SynthEnc(d_model, self.seg_len)
+        self.synth_enc = SynthEnc(d_model)
         self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
-
+        self.bm_pos = PositionalEncoding(d_model, self.seg_len)
+        # self.enc_prj.weight.data.copy_(torch.eye(self.enc_prj.weight.shape[0]))
+        # assert self.enc_prj.weight.shape[0] == self.enc_prj.weight.shape[1]
 
     def encode(self, mel, return_attns=False, return_cnn=False):
+        # print("Enter model.encode()")
         return_attns = return_attns & self.enable_encoder        
         mel = self.cnn(mel)
+        # mel = mel / 16.0
         if return_cnn:
-            self.mel_result = mel
+            self.mel_result = mel.clone()
         mel = torch.permute(mel, (0, 2, 1))
 
         # encoding
@@ -294,37 +373,78 @@ class NoteTransformer(nn.Module):
         return trg_seq
 
 
-    def forward(self, mel, bm, pitch, start, dur, voice, return_attns=False, return_cnn=False):
-        ######################################
-        bm = self.synth_enc(bm)
-        z = self.flow(bm)
-        ######################################
+    def forward(self, mel, bm, pitch, start, dur, voice, return_attns=False, return_cnn=False, force_align=False):
+        ori_id = id(mel)
+        # print("enter forward:", id(mel))
+        device = mel.device
+        mask = torch.ones((mel.size(0), 1, mel.size(2))).to(device)
+        # Note synthesize and flow
+        bm = self.synth_enc(bm) # bm (bsz, pitch_name, length, [0-1 act, onset-offet])
+        z = self.flow(bm, mask) # (B, D, LN)
+
+        mel_tmp = get_obj_by_id(ori_id)
+        # print("after synth:", mel_tmp.max().item(), mel_tmp.min().item())
         
-        if return_attns:
+        if return_attns and self.enable_encoder:
             mel, enc_attn = self.encode(mel, return_attns, return_cnn)
         else:
             mel = self.encode(mel, return_attns, return_cnn)
+        # print("model.encode() fin")
 
-        dist = self.enc_prj(mel)
-        mu, sig = dist
+        mel_tmp = get_obj_by_id(ori_id)
+        # print("after encode:", mel_tmp.max().item(), mel_tmp.min().item())
+        
+        # mel.shape [bsz, mel_bins, length] 
 
-        with torch.no_grad():
-            # cal neg ll
-            # neg_ll = owiejf
-            attn = monotonic_align.maximum_path(neg_ll, torch.ones_like(neg_ll)).detach()
+        # save_png = lambda t, f: __import__('torchvision').utils.save_image(t.unsqueeze(0), f)
+        save_png = lambda t, f: __import__('torchvision').utils.save_image(((t - t.min()) / (t.max() - t.min())).unsqueeze(0), f)
 
-        z = attn * z
+        # save_png(mel_ori[0], 'mel_ori.png')
+        # save_png(mel[0], 'mel_layer1.png')
+
+        # mu = self.enc_prj(mel)
+        mu = mel
+        # save_png(mu[0], 'mu.png')
+        logs = torch.zeros_like(mu).to(device) - 1.0
+        
+        # mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
+
+        # Align
+        if not force_align:
+            with torch.no_grad():
+                # cal log likelihood
+                ll = torch.sum(-0.5 * math.log(2 * math.pi) - logs, -1, keepdim=True)
+                factor = -0.5 * torch.exp(-2 * logs)
+                ll = ll + torch.matmul(factor, z**2)
+                ll -= 2 * torch.matmul(factor * mu, z)
+                ll += torch.sum(factor * mu**2, -1, keepdim=True)
+                ll = torch.permute(ll, (0, 2, 1)) # (B, LN, LM)
+                ll = ll.contiguous()
+
+                attn = monotonic_align.maximum_path(ll, torch.ones_like(ll).to(device)).detach()
+        else:
+            attn = torch.eye(z.size(2)).unsqueeze(0).to(device)          
+
+        z_A = torch.matmul(z, attn)
 
         trg_mask = get_trg_mask(pitch)
         trg_seq = self.get_trg_emb(pitch, start, dur, voice)
+        bm = torch.permute(bm, (0, 2, 1))
+
+        bm = self.bm_pos(bm)
+
+        # print("forward: 410", mel.max().item(), mel.min().item(), id(mel))
         
-        # return pitch_out, start_out, dur_out
         if return_attns:
             result, (dec_self_attn, dec_enc_attn) = self.decode(bm, trg_seq, trg_mask, return_attns)
-            return result, z, mu, sig, (enc_attn, dec_self_attn, dec_enc_attn)
+            # print("forward 414:", mel.max().item(), mel.min().item(), id(mel))
+            if self.enable_encoder:
+                return result, z_A, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, attn)
+            else:
+                return result, z_A, mu, logs, (None, dec_self_attn, dec_enc_attn, attn)
         else:
             result = self.decode(bm, trg_seq, trg_mask)
-            return result, z, mu, sig
+            return result, z_A, mu, logs
 
 
     def get_mix_emb(self, p, i, emb, mix):

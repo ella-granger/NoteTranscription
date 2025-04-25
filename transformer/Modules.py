@@ -20,6 +20,9 @@ class ScaledDotProductAttention(nn.Module):
             attn = attn.masked_fill(mask == 0, -1e9)
 
         attn = self.dropout(F.softmax(attn, dim=-1))
+        # print(attn.size())
+        # print(attn.min().item(), attn.max().item())
+        # print(v.size())
         output = torch.matmul(attn, v)
 
         return output, attn

@@ -41,8 +41,11 @@ class PositionalEncoding(nn.Module):
 
         return torch.FloatTensor(sinusoid_table).unsqueeze(0)
 
-    def forward(self, x):
-        return x + self.pos_table[:, :x.size(1)].clone().detach()
+    def forward(self, x, unsqueeze_dim=None):
+        p = self.pos_table[:, :x.size(1)].clone().detach()
+        if unsqueeze_dim is not None:
+            p = torch.unsqueeze(p, unsqueeze_dim)
+        return x + p
 
 
 class Encoder(nn.Module):
@@ -74,9 +77,13 @@ class Encoder(nn.Module):
         # -- Forward
         # enc_output = self.src_word_emb(src_seq)
         enc_output = src_seq
+        # print(enc_output.max().item(), enc_output.min().item())
         if self.scale_emb:
             enc_output *= self.d_model ** 0.5
+        # print(enc_output.max().item(), enc_output.min().item())
         enc_output = self.dropout(self.position_enc(enc_output))
+        # print(enc_output.max().item(), enc_output.min().item())
+        # _ = input()
         enc_output = self.layer_norm(enc_output)
 
         for enc_layer in self.layer_stack:

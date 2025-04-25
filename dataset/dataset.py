@@ -29,7 +29,7 @@ class MelDataset(torch.utils.data.Dataset):
         print(id_json)
         print(len(id_list))
         
-        mel_files = list(mel_dir.glob("*.pkl"))[:10]
+        mel_files = list(mel_dir.glob("*.pkl"))
         print(len(mel_files))
 
         self.mel_list = []
@@ -44,6 +44,9 @@ class MelDataset(torch.utils.data.Dataset):
             self.fid_list.append(f.stem)
             with open(f, 'rb') as fin:
                 mel = pickle.load(fin)
+                
+            mel = (mel + 6.59776449) / 4.78734646
+            
             self.mel_list.append(mel)
             with open(bm_dir / ("%s.pkl" % f.stem), "rb") as fin:
                 bm = pickle.load(fin)

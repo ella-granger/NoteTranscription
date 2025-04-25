@@ -15,6 +15,7 @@ if __name__ == "__main__":
     print(device)
     dataset = MelDataset(data_path / "mel_focus",
                          data_path / "note",
+                         data_path / "bm",
                          data_path / "full.json",
                          device=device)
 
@@ -38,6 +39,8 @@ if __name__ == "__main__":
             n_v = n[5]
             # print(n_p, n_s, n_e, n_v)
             for i, v in enumerate(n_v):
+                if v == 0:
+                    continue
                 n_id = pow(2, i)
                 # print(n_s, n_e)
                 bm[n_p, n_s:n_e, 0] = torch.bitwise_or(bm[n_p, n_s:n_e, 0],
@@ -49,5 +52,5 @@ if __name__ == "__main__":
                     bm[n_p, n_e-1, 1] = 1
         # print(bm[20:40, 0:100])
         # _ = input()
-        with open(Path("YouChorale_flow") / "bm" / ("%s.pkl" % f), 'wb') as fout:
+        with open(Path("YouChorale") / "bm" / ("%s.pkl" % f), 'wb') as fout:
             pickle.dump(bm, fout, protocol=4)

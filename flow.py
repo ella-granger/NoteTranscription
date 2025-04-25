@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import commons
 
 class WN(torch.nn.Module):
     def __init__(self, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0, p_dropout=0):

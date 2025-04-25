@@ -1,5 +1,6 @@
 cimport cython
 from cython.parallel import prange
+from libc.stdio cimport printf
 
 
 @cython.boundscheck(False)
@@ -45,22 +46,37 @@ cdef void maximum_path_each(int[:,::1] path, float[:,::1] value, int t_y, int t_
 
       value[y, x] = tmp
 
+  # """
   for y in range(t_y - 1, -1, -1):
+    # printf(b"------------------------\n")
+    # printf(b"y: %d\n", y)
+    # printf(b"i: %d\n", index)
+
     if index == -1:
       break
+
     direction = path[y, index]
-    if direction == 1:
-      path[y, index] = 0
-      index = index - 1
-      continue
-    if direction == 3:
-      continue
+    # printf(b"d: %d\n", direction)
+
     while direction == 2:
       path[y, index] = 0
       index = index - 1
       if index == -1:
         break
       direction = path[y, index]
+      # printf(b"i: %d\n", index)
+      # printf(b"d: %d\n", direction)
+
+    if direction == 1:
+      path[y, index] = 0
+      index = index - 1
+      continue
+    if direction == 3:
+      continue
+    
+  # """
+
+  
 
 
 @cython.boundscheck(False)

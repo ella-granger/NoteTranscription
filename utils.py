@@ -138,12 +138,16 @@ def build_sigmoid_norm(mu, sigma):
 
 def plot_attn(attn):
     K = attn.shape[0]
-    n_cols = 2
-    n_rows = K // 2
-    fig, axs = plt.subplots(n_rows, n_cols, figsize=(8,8))
-
-    for i in range(K):
-        axs[i // n_cols, i % n_cols].imshow(attn[i], origin="lower")
+    if K == 1:
+        fig, ax = plt.subplots(figsize=(8,8))
+        ax.imshow(attn[0], origin="lower")
+    else:
+        n_cols = 2
+        n_rows = K // 2
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(8,8))
+        for i in range(K):
+            im = axs[i // n_cols, i % n_cols].imshow(attn[i], origin="lower")
+            plt.colorbar(im, ax=axs[i//n_cols, i%n_cols])
 
     plt.close()
     return fig
