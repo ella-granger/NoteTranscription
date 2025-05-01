@@ -6,6 +6,8 @@ from torch.autograd import Function
 from numba import cuda
 import math
 
+from matplotlib import pyplot as plt
+
 # ----------------------------------------------------------------------------------------------------------------------
 @cuda.jit
 def compute_softdtw_cuda(D, gamma, bandwidth, max_i, max_j, n_passes, R):
@@ -100,6 +102,27 @@ def jacobean_product_squared_euclidean(X, Y, Bt):
     ones = torch.ones(Y.shape).to('cuda' if Bt.is_cuda else 'cpu')
     return 2 * (ones.matmul(Bt) * X - Y.matmul(Bt))
 
+
+def jacobean_product_norm_nll(z, mu, logs, D, B):
+    print("--------------J mat--------------")
+    print(z.size())
+    print(mu.size())
+    print(logs.size())
+    print(D.size())
+    print(B.size())
+    print("---------------------------------")
+
+    en2logs = torch.exp(-2 * logs)
+    Bt = B.transpose(1, 2)
+    pn1 = torch.ones(z.shape).to('cuda' if B.is_cuda else 'cpu')
+
+    Jz = en2logs.matmul(Bt) * z - mu.matmul(Bt)
+    Jmu = pn1.matmul(B) * mu * en2logs - z.matmul(B)
+    Jlogs = 2 * pn1.matmul(B) * logs + pn1.matmul(1 + math.log(2 * math.pi) - 2 * D)
+
+    return Jz.transpose(1,2), Jmu.transpose(1,2), Jlogs.transpose(1,2)
+
+
 class _SoftDTWCUDA(Function):
     """
     CUDA implementation is inspired by the diagonal one proposed in https://ieeexplore.ieee.org/document/8400444:
@@ -107,7 +130,7 @@ class _SoftDTWCUDA(Function):
     """
 
     @staticmethod
-    def forward(ctx, X, Y, D, gamma, bandwidth):
+    def forward(ctx, z, mu, logs, D, gamma, bandwidth):
         dev = D.device
         dtype = D.dtype
         gamma = torch.cuda.FloatTensor([gamma])
@@ -129,14 +152,21 @@ class _SoftDTWCUDA(Function):
         compute_softdtw_cuda[B, threads_per_block](cuda.as_cuda_array(D.detach()),
                                                    gamma.item(), bandwidth.item(), N, M, n_passes,
                                                    cuda.as_cuda_array(R))
-        ctx.save_for_backward(D, X, Y, R, gamma, bandwidth)
+        ctx.save_for_backward(D, z, mu, logs, R, gamma, bandwidth)
         return R[:, -2, -2]
 
     @staticmethod
     def backward(ctx, grad_output):
+        print("------------Backward------------")
+        print(grad_output.size())
         dev = grad_output.device
         dtype = grad_output.dtype
-        D, X, Y, R, gamma, bandwidth = ctx.saved_tensors
+        # D, X, Y, R, gamma, bandwidth = ctx.saved_tensors
+        D, z, mu, logs, R, gamma, bandwidth = ctx.saved_tensors
+        print("------------In size-------------")
+        print(z.size())
+        print(mu.size())
+        print(logs.size())
 
         B = D.shape[0]
         N = D.shape[1]
@@ -160,9 +190,28 @@ class _SoftDTWCUDA(Function):
                                                             1.0 / gamma.item(), bandwidth.item(), N, M, n_passes,
                                                             cuda.as_cuda_array(E))
         E = E[:, 1:N + 1, 1:M + 1]
-        G = jacobean_product_squared_euclidean(X.transpose(1,2), Y.transpose(1,2), E.transpose(1,2)).transpose(1,2)
+        print("--------------E--------------")
+        print(E.size())
+        plt.clf()
+        plt.matshow(E[0].detach().cpu(), origin="lower")
+        plt.colorbar()
+        plt.savefig("E.png")
+        Jz, Jmu, Jlogs = jacobean_product_norm_nll(z.transpose(1,2),
+                                                   mu.transpose(1,2),
+                                                   logs.transpose(1,2),
+                                                   D, E)
+        # G = jacobean_product_squared_euclidean(X.transpose(1,2), Y.transpose(1,2), E.transpose(1,2)).transpose(1,2)
+        # print(G.size())
+        print(Jz.size())
+        print(Jmu.size())
+        print(Jlogs.size())
+        print("------------J fin------------")
 
-        return grad_output.view(-1, 1, 1).expand_as(G) * G, None, None, None, None
+        Jz = grad_output.view(-1, 1, 1).expand_as(Jz) * Jz
+        Jmu = grad_output.view(-1, 1, 1).expand_as(Jmu) * Jmu
+        Jlogs = grad_output.view(-1, 1, 1).expand_as(Jlogs) * Jlogs
+
+        return Jz, Jmu, Jlogs, None, None, None
 
 # ----------------------------------------------------------------------------------------------------------------------
 class SoftDTW(torch.nn.Module):
@@ -191,19 +240,26 @@ class SoftDTW(torch.nn.Module):
 
         # Set the distance function
         if dist_func is not None:
-            self.dist_func = dist_func
+            if dist_func == "nll":
+                self.dist_func = SoftDTW._norm_nll_func
+            else:
+                self.dist_func = dist_func
         else:
             self.dist_func = SoftDTW._euclidean_dist_func
 
-    def _get_func_dtw(self, x, y):
+    def _get_func_dtw(self, z, mu, logs):
         """
         Checks the inputs and selects the proper implementation to use.
         """
-        bx, lx, dx = x.shape
-        by, ly, dy = y.shape
+        bx, lx, dx = z.shape
+        by, ly, dy = mu.shape
+        bs, ls, ds = logs.shape
         # Make sure the dimensions match
         assert bx == by  # Equal batch sizes
+        assert bx == bs
         assert dx == dy  # Equal feature dimensions
+        assert dx == ds
+        assert ly == ls
 
         use_cuda = self.use_cuda
 
@@ -226,7 +282,31 @@ class SoftDTW(torch.nn.Module):
         y = y.unsqueeze(1).expand(-1, n, m, d)
         return torch.pow(x - y, 2).sum(3)
 
-    def forward(self, X, Y):
+    @staticmethod
+    def _norm_nll_func(z, mu, logs):
+        print("----------------------------------")
+        z = z.transpose(1,2)
+        print(z.size())
+        print(mu.size())
+        print(logs.size())
+        print("----------------------------------")
+        nll = torch.sum(0.5 * math.log(2 * math.pi) + logs, -1, keepdim=True)
+        print(nll.size())
+        factor = 0.5 * torch.exp(-2 * logs)
+        print(factor.size())
+        nll = nll + torch.matmul(factor, z**2)
+        print(nll.size())
+        nll -= 2 * torch.matmul(factor * mu, z)
+        print(nll.size())
+        nll += torch.sum(factor * mu**2, -1, keepdim=True)
+        print(nll.size())
+        nll = torch.permute(nll, (0, 2, 1)) # (B, LN, LM)
+        print(nll.size())
+        nll = nll.contiguous()
+        print("------------D fin----------------")
+        return nll
+
+    def forward(self, z, mu, logs):
         """
         Compute the soft-DTW value between X and Y
         :param X: One batch of examples, batch_size x seq_len x dims
@@ -235,7 +315,7 @@ class SoftDTW(torch.nn.Module):
         """
 
         # Check the inputs and get the correct implementation
-        func_dtw = self._get_func_dtw(X, Y)
+        func_dtw = self._get_func_dtw(z, mu, logs)
 
         if self.normalize:
             # Stack everything up and run
@@ -246,5 +326,35 @@ class SoftDTW(torch.nn.Module):
             out_xy, out_xx, out_yy = torch.split(out, X.shape[0])
             return out_xy - 1 / 2 * (out_xx + out_yy)
         else:
-            D_xy = self.dist_func(X, Y)
-            return func_dtw(X, Y, D_xy, self.gamma, self.bandwidth)
+            D = self.dist_func(z, mu, logs)
+            plt.clf()
+            plt.matshow(D[0].detach().cpu(), origin="lower")
+            plt.colorbar()
+            plt.savefig("D.png")
+            return func_dtw(z, mu, logs, D, self.gamma, self.bandwidth)
+
+
+if __name__ == "__main__":
+    batch_size, len_x, len_y, dims = 8, 15, 12, 5 # 8, 15, 12, 5
+    # z = [1,1,1,3,3,3,5,5,5,3,3,3,1,1,1]
+    # mu = [1,1,3,3,4,5,5,4,3,3,1,1]
+    # mu = [1,1,1,3,3,3,5,5,5,3,3,3,1,1,1]
+    # z = [1,1,1,2,2,2,3,3,3,4,4,4,5,5,5]
+    # mu = [2,2,2,3,3,3,4,4,4,5,5,5,6,6,6]
+    z = torch.rand((batch_size, len_x, dims), requires_grad=True).cuda()
+    mu = torch.rand((batch_size, len_y, dims), requires_grad=True).cuda()
+    # z = torch.tensor(z).unsqueeze(0).unsqueeze(-1).cuda().to(torch.float32)
+    # mu = torch.tensor(mu).unsqueeze(0).unsqueeze(-1).cuda().to(torch.float32) + 10
+    # logs = torch.abs(torch.rand((batch_size, len_y, dims), requires_grad=True)).cuda()
+    logs = torch.zeros_like(mu, requires_grad=True).cuda() - 1.0
+
+    # Create the "criterion" object
+    sdtw = SoftDTW(use_cuda=True, gamma=0.1, dist_func="nll")
+
+    # Compute the loss value
+    loss = sdtw(z, mu, logs)  # Just like any torch.nn.xyzLoss()
+    loss = loss.mean()
+    print(loss.item())
+
+    # Aggregate and call backward()
+    loss.backward()

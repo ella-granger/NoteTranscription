@@ -293,7 +293,7 @@ class NoteTransformer(nn.Module):
 
         # SynthEnc
         self.synth_enc = SynthEnc(d_model)
-        # self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
+        self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
         self.bm_pos = PositionalEncoding(d_model, self.seg_len)
         # self.enc_prj.weight.data.copy_(torch.eye(self.enc_prj.weight.shape[0]))
         # assert self.enc_prj.weight.shape[0] == self.enc_prj.weight.shape[1]
@@ -380,8 +380,8 @@ class NoteTransformer(nn.Module):
         mask = torch.ones((mel.size(0), 1, mel.size(2))).to(device)
         # Note synthesize and flow
         bm = self.synth_enc(bm) # bm (bsz, pitch_name, length, [0-1 act, onset-offet])
-        # z = self.flow(bm, mask) # (B, D, LN)
-        z = bm
+        z = self.flow(bm, mask) # (B, D, LN)
+        # z = bm
 
         mel_tmp = get_obj_by_id(ori_id)
         # print("after synth:", mel_tmp.max().item(), mel_tmp.min().item())
@@ -398,7 +398,7 @@ class NoteTransformer(nn.Module):
         # mel.shape [bsz, mel_bins, length] 
 
         # save_png = lambda t, f: __import__('torchvision').utils.save_image(t.unsqueeze(0), f)
-        save_png = lambda t, f: __import__('torchvision').utils.save_image(((t - t.min()) / (t.max() - t.min())).unsqueeze(0), f)
+        # save_png = lambda t, f: __import__('torchvision').utils.save_image(((t - t.min()) / (t.max() - t.min())).unsqueeze(0), f)
 
         # save_png(mel_ori[0], 'mel_ori.png')
         # save_png(mel[0], 'mel_layer1.png')
@@ -410,6 +410,7 @@ class NoteTransformer(nn.Module):
         
         # mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
 
+        """
         # Align
         if not force_align:
             with torch.no_grad():
@@ -427,6 +428,7 @@ class NoteTransformer(nn.Module):
             attn = torch.eye(z.size(2)).unsqueeze(0).to(device)          
 
         z_A = torch.matmul(z, attn)
+        """
 
         trg_mask = get_trg_mask(pitch)
         trg_seq = self.get_trg_emb(pitch, start, dur, voice)
@@ -440,9 +442,9 @@ class NoteTransformer(nn.Module):
             result, (dec_self_attn, dec_enc_attn) = self.decode(bm, trg_seq, trg_mask, return_attns)
             # print("forward 414:", mel.max().item(), mel.min().item(), id(mel))
             if self.enable_encoder:
-                return result, z_A, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, attn)
+                return result, z, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, attn)
             else:
-                return result, z_A, mu, logs, (None, dec_self_attn, dec_enc_attn, attn)
+                return result, z, mu, logs, (None, dec_self_attn, dec_enc_attn, attn)
         else:
             result = self.decode(bm, trg_seq, trg_mask)
             return result, z_A, mu, logs
