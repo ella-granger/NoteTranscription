@@ -10,7 +10,7 @@ from torchvision.ops import MLP
 from transformer.Models import Encoder, Decoder, PositionalEncoding, get_pad_mask, get_subsequent_mask
 import math
 from flow import ResidualCouplingBlock
-import monotonic_align
+# import monotonic_align
 from dataset.constants import *
 from tqdm import tqdm
 import gc
@@ -254,7 +254,7 @@ class NoteTransformer(nn.Module):
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
                                    scale_emb=False)
-        self.enc_prj = nn.Linear(d_model, d_model * 2)
+        # self.enc_prj = nn.Linear(d_model, d_model * 2)
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model, padding_idx=PAD_IDX)
@@ -381,6 +381,7 @@ class NoteTransformer(nn.Module):
         # Note synthesize and flow
         bm = self.synth_enc(bm) # bm (bsz, pitch_name, length, [0-1 act, onset-offet])
         z = self.flow(bm.detach(), mask) # (B, D, LN)
+        z = torch.permute(z, (0, 2, 1)) # (B, LN, D)
         
         if return_attns and self.enable_encoder:
             mel, enc_attn = self.encode(mel, return_attns, return_cnn)
@@ -395,12 +396,12 @@ class NoteTransformer(nn.Module):
         # save_png(mel_ori[0], 'mel_ori.png')
         # save_png(mel[0], 'mel_layer1.png')
 
-        mu = self.enc_prj(mel)
-        # mu = mel
+        # dist = self.enc_prj(mel)
+        mu = mel
         # save_png(mu[0], 'mu.png')
-        # logs = torch.zeros_like(mu).to(device) - 1.0
+        logs = torch.zeros_like(mu).to(device)  # - 1.0
         
-        mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
+        # mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
 
         """
         # Align

@@ -392,6 +392,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
             else:
                 if (not scheduled_sampling or step < scheduled_sampling_step):
                     result, z, mu, logs = model(mel, bm, pitch_i, start_i, dur_i, voice_i, force_align=step < align_step)
+                    # np.save("z.npy", z.detach().cpu().numpy())
+                    # np.save("mu.npy", mu.detach().cpu().numpy())
+                    # np.save("logs.npy", logs.detach().cpu().numpy())
                     # print("train after:", mel.max().item(), mel.min().item(), id(mel))
                     pitch_p, start_p, dur_p, voice_p = result
                 else:
@@ -419,7 +422,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
                 enc_loss = sdtw(z, mu, logs) # nll_norm_loss(z.detach(), mu, logs) * 0.01
-                enc_loss = enc_loss.mean()
+                enc_loss = enc_loss.mean() * 0.0001
 
                 diou_loss = 0  
                 if "diou" in prob_model:
@@ -428,6 +431,13 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 loss = pitch_loss + voice_loss + time_lambda * (start_loss + dur_loss + diou_loss) + enc_loss
 
             loss.backward()
+            # for name, p in model.named_parameters():
+            #     if p.grad is not None:
+            #         print(name, p.grad.size())
+            # g = model.cnn[0].weight.grad
+            # print(g.size(), g.max(), g.min())
+            # print(enc_loss.item())
+            # _ = input()
             if scst and step > scst_step:
                 torch.nn.utils.clip_grad_norm(model.parameters(), clip_gradient_norm)
             optimizer.step()
@@ -541,7 +551,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             start_loss = time_loss(start_p, start_o, seq_mask)
                             dur_loss = time_loss(dur_p, dur_o, seq_mask)
                             enc_loss = sdtw(z, mu, logs) # nll_norm_loss(z, mu, logs) * 0.01
-                            enc_loss = enc_loss.mean()
+                            enc_loss = enc_loss.mean() * 0.0001
 
                             if "diou" in prob_model:
                                 diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
@@ -568,7 +578,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
                             # print(mel.max(), mel.min())
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
-                            sw.add_figure("align/z_n_%d" % i, plot_spec(z[0].detach().cpu()), step)
+                            sw.add_figure("align/z_n_%d" % i, plot_spec(z[0].detach().cpu().T), step)
                             sw.add_figure("align/mu_m_%d" % i, plot_spec(mu[0].detach().cpu().T), step)
                             # sw.add_figure("align/logs_m_%d" % i, plot_spec(logs[0].detach().cpu().T), step)
                             sw.add_figure("enc/cnn_%d" % i, plot_spec(mel_result[0].detach().cpu()), step)

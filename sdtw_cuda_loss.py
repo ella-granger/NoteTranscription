@@ -104,13 +104,13 @@ def jacobean_product_squared_euclidean(X, Y, Bt):
 
 
 def jacobean_product_norm_nll(z, mu, logs, D, B):
-    print("--------------J mat--------------")
-    print(z.size())
-    print(mu.size())
-    print(logs.size())
-    print(D.size())
-    print(B.size())
-    print("---------------------------------")
+    # print("--------------J mat--------------")
+    # print(z.size())
+    # print(mu.size())
+    # print(logs.size())
+    # print(D.size())
+    # print(B.size())
+    # print("---------------------------------")
 
     en2logs = torch.exp(-2 * logs)
     Bt = B.transpose(1, 2)
@@ -157,16 +157,16 @@ class _SoftDTWCUDA(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        print("------------Backward------------")
-        print(grad_output.size())
+        # print("------------Backward------------")
+        # print(grad_output.size())
         dev = grad_output.device
         dtype = grad_output.dtype
         # D, X, Y, R, gamma, bandwidth = ctx.saved_tensors
         D, z, mu, logs, R, gamma, bandwidth = ctx.saved_tensors
-        print("------------In size-------------")
-        print(z.size())
-        print(mu.size())
-        print(logs.size())
+        # print("------------In size-------------")
+        # print(z.size())
+        # print(mu.size())
+        # print(logs.size())
 
         B = D.shape[0]
         N = D.shape[1]
@@ -190,8 +190,8 @@ class _SoftDTWCUDA(Function):
                                                             1.0 / gamma.item(), bandwidth.item(), N, M, n_passes,
                                                             cuda.as_cuda_array(E))
         E = E[:, 1:N + 1, 1:M + 1]
-        print("--------------E--------------")
-        print(E.size())
+        # print("--------------E--------------")
+        # print(E.size())
         plt.clf()
         plt.matshow(E[0].detach().cpu(), origin="lower")
         plt.colorbar()
@@ -202,16 +202,16 @@ class _SoftDTWCUDA(Function):
                                                    D, E)
         # G = jacobean_product_squared_euclidean(X.transpose(1,2), Y.transpose(1,2), E.transpose(1,2)).transpose(1,2)
         # print(G.size())
-        print(Jz.size())
-        print(Jmu.size())
-        print(Jlogs.size())
-        print("------------J fin------------")
+        # print(Jz.size())
+        # print(Jmu.size())
+        # print(Jlogs.size())
+        # print("------------J fin------------")
 
         Jz = grad_output.view(-1, 1, 1).expand_as(Jz) * Jz
         Jmu = grad_output.view(-1, 1, 1).expand_as(Jmu) * Jmu
         Jlogs = grad_output.view(-1, 1, 1).expand_as(Jlogs) * Jlogs
 
-        return Jz, Jmu, Jlogs, None, None, None
+        return Jz, Jmu, Jlogs, E, None, None
 
 # ----------------------------------------------------------------------------------------------------------------------
 class SoftDTW(torch.nn.Module):
@@ -251,6 +251,9 @@ class SoftDTW(torch.nn.Module):
         """
         Checks the inputs and selects the proper implementation to use.
         """
+        # print(z.shape)
+        # print(mu.shape)
+        # print(logs.shape)
         bx, lx, dx = z.shape
         by, ly, dy = mu.shape
         bs, ls, ds = logs.shape
@@ -284,26 +287,26 @@ class SoftDTW(torch.nn.Module):
 
     @staticmethod
     def _norm_nll_func(z, mu, logs):
-        print("----------------------------------")
+        # print("----------------------------------")
         z = z.transpose(1,2)
-        print(z.size())
-        print(mu.size())
-        print(logs.size())
-        print("----------------------------------")
+        # print(z.size())
+        # print(mu.size())
+        # print(logs.size())
+        # print("----------------------------------")
         nll = torch.sum(0.5 * math.log(2 * math.pi) + logs, -1, keepdim=True)
-        print(nll.size())
+        # print(nll.size())
         factor = 0.5 * torch.exp(-2 * logs)
-        print(factor.size())
+        # print(factor.size())
         nll = nll + torch.matmul(factor, z**2)
-        print(nll.size())
+        # print(nll.size())
         nll -= 2 * torch.matmul(factor * mu, z)
-        print(nll.size())
+        # print(nll.size())
         nll += torch.sum(factor * mu**2, -1, keepdim=True)
-        print(nll.size())
+        # print(nll.size())
         nll = torch.permute(nll, (0, 2, 1)) # (B, LN, LM)
-        print(nll.size())
+        # print(nll.size())
         nll = nll.contiguous()
-        print("------------D fin----------------")
+        # print("------------D fin----------------")
         return nll
 
     def forward(self, z, mu, logs):
