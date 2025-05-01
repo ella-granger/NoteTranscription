@@ -21,6 +21,7 @@ from transformer.Optim import ScheduledOptim
 from mir_metrics import cal_mir_metrics
 from tqdm import tqdm
 from dataset.constants import *
+from sdtw_cuda_loss import SoftDTW
 from utils import *
 import torch.multiprocessing as mp
 import time
@@ -340,6 +341,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
         
 
     time_loss = get_time_loss(prob_model)
+    sdtw = SoftDTW(use_cuda=True, gamma=0.1, dist_func="nll")
 
     start_eval = True
     # end_flag = False
@@ -416,7 +418,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 # print("END")
                 dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
-                enc_loss = nll_norm_loss(z.detach(), mu, logs) * 0.01
+                enc_loss = sdtw(z, mu, logs) # nll_norm_loss(z.detach(), mu, logs) * 0.01
+                enc_loss = enc_loss.mean()
 
                 diou_loss = 0  
                 if "diou" in prob_model:
@@ -537,7 +540,8 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
                             start_loss = time_loss(start_p, start_o, seq_mask)
                             dur_loss = time_loss(dur_p, dur_o, seq_mask)
-                            enc_loss = nll_norm_loss(z, mu, logs) * 0.01
+                            enc_loss = sdtw(z, mu, logs) # nll_norm_loss(z, mu, logs) * 0.01
+                            enc_loss = enc_loss.mean()
 
                             if "diou" in prob_model:
                                 diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
@@ -598,7 +602,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             for a_i, attn in enumerate(dec_enc_attn):
                                 sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             # print(align_attn.size())
-                            sw.add_figure("align/path", plot_attn(align_attn.detach().cpu()), step)
+                            # sw.add_figure("align/path", plot_attn(align_attn.detach().cpu()), step)
                             # """
                             if scst and step > scst_step:
                                 print(start_p.shape)

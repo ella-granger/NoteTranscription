@@ -254,7 +254,7 @@ class NoteTransformer(nn.Module):
                                    d_inner=d_inner,
                                    n_position=self.seg_len,
                                    scale_emb=False)
-        # self.enc_prj = nn.Linear(d_model, d_model)
+        self.enc_prj = nn.Linear(d_model, d_model * 2)
 
         # Decoder
         self.trg_pitch_emb = nn.Embedding(PAD_IDX+1, d_model, padding_idx=PAD_IDX)
@@ -374,28 +374,20 @@ class NoteTransformer(nn.Module):
 
 
     def forward(self, mel, bm, pitch, start, dur, voice, return_attns=False, return_cnn=False, force_align=False):
-        ori_id = id(mel)
+        # ori_id = id(mel)
         # print("enter forward:", id(mel))
         device = mel.device
         mask = torch.ones((mel.size(0), 1, mel.size(2))).to(device)
         # Note synthesize and flow
         bm = self.synth_enc(bm) # bm (bsz, pitch_name, length, [0-1 act, onset-offet])
-        z = self.flow(bm, mask) # (B, D, LN)
-        # z = bm
-
-        mel_tmp = get_obj_by_id(ori_id)
-        # print("after synth:", mel_tmp.max().item(), mel_tmp.min().item())
+        z = self.flow(bm.detach(), mask) # (B, D, LN)
         
         if return_attns and self.enable_encoder:
             mel, enc_attn = self.encode(mel, return_attns, return_cnn)
         else:
             mel = self.encode(mel, return_attns, return_cnn)
-        # print("model.encode() fin")
-
-        mel_tmp = get_obj_by_id(ori_id)
-        # print("after encode:", mel_tmp.max().item(), mel_tmp.min().item())
         
-        # mel.shape [bsz, mel_bins, length] 
+        # mel.shape [B, D, LM]
 
         # save_png = lambda t, f: __import__('torchvision').utils.save_image(t.unsqueeze(0), f)
         # save_png = lambda t, f: __import__('torchvision').utils.save_image(((t - t.min()) / (t.max() - t.min())).unsqueeze(0), f)
@@ -403,12 +395,12 @@ class NoteTransformer(nn.Module):
         # save_png(mel_ori[0], 'mel_ori.png')
         # save_png(mel[0], 'mel_layer1.png')
 
-        # mu = self.enc_prj(mel)
-        mu = mel
+        mu = self.enc_prj(mel)
+        # mu = mel
         # save_png(mu[0], 'mu.png')
-        logs = torch.zeros_like(mu).to(device) - 1.0
+        # logs = torch.zeros_like(mu).to(device) - 1.0
         
-        # mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
+        mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
 
         """
         # Align
@@ -442,12 +434,12 @@ class NoteTransformer(nn.Module):
             result, (dec_self_attn, dec_enc_attn) = self.decode(bm, trg_seq, trg_mask, return_attns)
             # print("forward 414:", mel.max().item(), mel.min().item(), id(mel))
             if self.enable_encoder:
-                return result, z, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, attn)
+                return result, z, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, None)
             else:
-                return result, z, mu, logs, (None, dec_self_attn, dec_enc_attn, attn)
+                return result, z, mu, logs, (None, dec_self_attn, dec_enc_attn, None)
         else:
             result = self.decode(bm, trg_seq, trg_mask)
-            return result, z_A, mu, logs
+            return result, z, mu, logs
 
 
     def get_mix_emb(self, p, i, emb, mix):
