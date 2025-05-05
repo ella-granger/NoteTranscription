@@ -192,10 +192,12 @@ class _SoftDTWCUDA(Function):
         E = E[:, 1:N + 1, 1:M + 1]
         # print("--------------E--------------")
         # print(E.size())
+        """
         plt.clf()
         plt.matshow(E[0].detach().cpu(), origin="lower")
         plt.colorbar()
         plt.savefig("E.png")
+        """
         Jz, Jmu, Jlogs = jacobean_product_norm_nll(z.transpose(1,2),
                                                    mu.transpose(1,2),
                                                    logs.transpose(1,2),
@@ -330,10 +332,12 @@ class SoftDTW(torch.nn.Module):
             return out_xy - 1 / 2 * (out_xx + out_yy)
         else:
             D = self.dist_func(z, mu, logs)
+            """
             plt.clf()
             plt.matshow(D[0].detach().cpu(), origin="lower")
             plt.colorbar()
             plt.savefig("D.png")
+            """
             return func_dtw(z, mu, logs, D, self.gamma, self.bandwidth)
 
 

@@ -264,14 +264,14 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
     save_config(ex.current_run.config, logdir / "config.json")
 
     data_path = Path(data_path)
-    train_data = MelDataset(data_path / "mel",
+    train_data = MelDataset(data_path / "mel_focus",
                             data_path / "note",
                             data_path / "bm",
                             data_path / "train.json",
                             seg_len=seg_len,
                             device=device)
 
-    valid_data = MelDataset(data_path / "mel",
+    valid_data = MelDataset(data_path / "mel_focus",
                             data_path / "note",
                             data_path / "bm",
                             data_path / "valid.json",
@@ -421,8 +421,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                 # print("END")
                 dur_loss = time_loss(dur_p, dur_o, seq_mask)
 
-                enc_loss = sdtw(z, mu, logs) # nll_norm_loss(z.detach(), mu, logs) * 0.01
-                enc_loss = enc_loss.mean() * 0.0001
+                # enc_loss = sdtw(z, mu, logs)
+                enc_loss = nll_norm_loss(z.detach(), mu, logs) * 0.01
+                # enc_loss = enc_loss.mean() * 0.0001
 
                 diou_loss = 0  
                 if "diou" in prob_model:
@@ -550,8 +551,9 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             voice_loss = masked_bce_loss(voice_p, voice_o, seq_mask)
                             start_loss = time_loss(start_p, start_o, seq_mask)
                             dur_loss = time_loss(dur_p, dur_o, seq_mask)
-                            enc_loss = sdtw(z, mu, logs) # nll_norm_loss(z, mu, logs) * 0.01
-                            enc_loss = enc_loss.mean() * 0.0001
+                            # enc_loss = sdtw(z, mu, logs)
+                            # enc_loss = enc_loss.mean() * 0.0001
+                            enc_loss = nll_norm_loss(z, mu, logs) * 0.01
 
                             if "diou" in prob_model:
                                 diou_loss = masked_diou_loss(start_p, dur_p, start_o, dur_o, seq_mask) # diou loss
@@ -578,7 +580,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                                 sw.add_text("info_%d" % i, "%s:%.3f-%.3f" % (fid, begin_time, end_time), step)
                             # print(mel.max(), mel.min())
                             sw.add_figure("spec_%d" % i, plot_spec(mel[0].detach().cpu()), step)
-                            sw.add_figure("align/z_n_%d" % i, plot_spec(z[0].detach().cpu().T), step)
+                            sw.add_figure("align/z_n_%d" % i, plot_spec(z[0].detach().cpu()), step)
                             sw.add_figure("align/mu_m_%d" % i, plot_spec(mu[0].detach().cpu().T), step)
                             # sw.add_figure("align/logs_m_%d" % i, plot_spec(logs[0].detach().cpu().T), step)
                             sw.add_figure("enc/cnn_%d" % i, plot_spec(mel_result[0].detach().cpu()), step)
@@ -612,7 +614,7 @@ def train(logdir, device, n_layers, checkpoint_interval, batch_size,
                             for a_i, attn in enumerate(dec_enc_attn):
                                 sw.add_figure("Attn/dec_enc_%d" % a_i, plot_attn(attn[0].detach().cpu()), step)
                             # print(align_attn.size())
-                            # sw.add_figure("align/path", plot_attn(align_attn.detach().cpu()), step)
+                            sw.add_figure("align/path", plot_attn(align_attn.detach().cpu()), step)
                             # """
                             if scst and step > scst_step:
                                 print(start_p.shape)

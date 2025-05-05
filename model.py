@@ -10,7 +10,7 @@ from torchvision.ops import MLP
 from transformer.Models import Encoder, Decoder, PositionalEncoding, get_pad_mask, get_subsequent_mask
 import math
 from flow import ResidualCouplingBlock
-# import monotonic_align
+import monotonic_align
 from dataset.constants import *
 from tqdm import tqdm
 import gc
@@ -227,7 +227,7 @@ class NoteTransformer(nn.Module):
             nn.ReLU(),
             nn.Conv1d(d_model // 2, d_model, kernel_size, padding=padding_len),
             nn.BatchNorm1d(d_model),
-            nn.ReLU(),
+            # nn.ReLU(),
             nn.Dropout(0.1)
         )
         # self.cnn = ConvStack(N_MELS, d_model)
@@ -293,7 +293,7 @@ class NoteTransformer(nn.Module):
 
         # SynthEnc
         self.synth_enc = SynthEnc(d_model)
-        self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 4, gin_channels=256)
+        # self.flow = ResidualCouplingBlock(d_model, d_model, 5, 1, 1, gin_channels=256) # 5, 1, 4
         self.bm_pos = PositionalEncoding(d_model, self.seg_len)
         # self.enc_prj.weight.data.copy_(torch.eye(self.enc_prj.weight.shape[0]))
         # assert self.enc_prj.weight.shape[0] == self.enc_prj.weight.shape[1]
@@ -380,8 +380,9 @@ class NoteTransformer(nn.Module):
         mask = torch.ones((mel.size(0), 1, mel.size(2))).to(device)
         # Note synthesize and flow
         bm = self.synth_enc(bm) # bm (bsz, pitch_name, length, [0-1 act, onset-offet])
-        z = self.flow(bm.detach(), mask) # (B, D, LN)
-        z = torch.permute(z, (0, 2, 1)) # (B, LN, D)
+        # z = self.flow(bm.detach(), mask) # (B, D, LN)
+        z = bm.detach()
+        # z = torch.permute(z, (0, 2, 1)) # (B, LN, D)
         
         if return_attns and self.enable_encoder:
             mel, enc_attn = self.encode(mel, return_attns, return_cnn)
@@ -403,7 +404,7 @@ class NoteTransformer(nn.Module):
         
         # mu, logs = torch.split(dist, [self.d_model]*2, 2) # (B, LM, D)
 
-        """
+        # """
         # Align
         if not force_align:
             with torch.no_grad():
@@ -416,30 +417,34 @@ class NoteTransformer(nn.Module):
                 ll = torch.permute(ll, (0, 2, 1)) # (B, LN, LM)
                 ll = ll.contiguous()
 
-                attn = monotonic_align.maximum_path(ll, torch.ones_like(ll).to(device)).detach()
+                attn = monotonic_align.maximum_path(ll, torch.ones_like(ll).to(device), ll.mean().item()).detach()
         else:
             attn = torch.eye(z.size(2)).unsqueeze(0).to(device)          
 
-        z_A = torch.matmul(z, attn)
-        """
+        # z_A = torch.matmul(z, attn)
+        # print(mu.size())
+        mu = torch.matmul(mu.transpose(1,2), attn.transpose(1,2))
+        logs = torch.matmul(logs.transpose(1,2), attn.transpose(1,2))
+        # """
 
         trg_mask = get_trg_mask(pitch)
         trg_seq = self.get_trg_emb(pitch, start, dur, voice)
-        bm = torch.permute(bm, (0, 2, 1))
+        mu = torch.permute(mu, (0, 2, 1))
+        logs = torch.permute(logs, (0, 2, 1))
 
-        bm = self.bm_pos(bm)
+        dec_in = self.bm_pos(mu)
 
         # print("forward: 410", mel.max().item(), mel.min().item(), id(mel))
         
         if return_attns:
-            result, (dec_self_attn, dec_enc_attn) = self.decode(bm, trg_seq, trg_mask, return_attns)
+            result, (dec_self_attn, dec_enc_attn) = self.decode(dec_in, trg_seq, trg_mask, return_attns)
             # print("forward 414:", mel.max().item(), mel.min().item(), id(mel))
             if self.enable_encoder:
-                return result, z, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, None)
+                return result, z, mu, logs, (enc_attn, dec_self_attn, dec_enc_attn, attn)
             else:
-                return result, z, mu, logs, (None, dec_self_attn, dec_enc_attn, None)
+                return result, z, mu, logs, (None, dec_self_attn, dec_enc_attn, attn)
         else:
-            result = self.decode(bm, trg_seq, trg_mask)
+            result = self.decode(dec_in, trg_seq, trg_mask)
             return result, z, mu, logs
 
 

@@ -5,7 +5,7 @@ from libc.stdio cimport printf
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef void maximum_path_each(int[:,::1] path, float[:,::1] value, int t_y, int t_x, float max_neg_val=-1e9) nogil:
+cdef void maximum_path_each(int[:,::1] path, float[:,::1] value, int t_y, int t_x, float max_neg_val=-1e9, float pen=-500.0) nogil:
   cdef int x
   cdef int y
   cdef int direction
@@ -23,17 +23,17 @@ cdef void maximum_path_each(int[:,::1] path, float[:,::1] value, int t_y, int t_
           v_left = max_neg_val
           v_prev = 0.
         else:
-          v_left = value[y-1, x]
+          v_left = value[y-1, x] + pen
           v_prev = max_neg_val
       else:
         if y == 0:
-          v_up = value[y, x-1]
+          v_up = value[y, x-1] + pen
           v_left = max_neg_val
           v_prev = max_neg_val
         else:
           v_prev = value[y-1, x-1]
-          v_up = value[y, x-1]
-          v_left = value[y-1, x]
+          v_up = value[y, x-1] + pen
+          v_left = value[y-1, x] + pen
 
       tmp = max(value[y, x] + v_prev, value[y, x] + v_up, v_left)
       if value[y, x] + v_prev == tmp:
@@ -81,8 +81,8 @@ cdef void maximum_path_each(int[:,::1] path, float[:,::1] value, int t_y, int t_
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef void maximum_path_c(int[:,:,::1] paths, float[:,:,::1] values, int[::1] t_ys, int[::1] t_xs) nogil:
+cpdef void maximum_path_c(int[:,:,::1] paths, float[:,:,::1] values, int[::1] t_ys, int[::1] t_xs, float pen) nogil:
   cdef int b = paths.shape[0]
   cdef int i
   for i in prange(b, nogil=True):
-    maximum_path_each(paths[i], values[i], t_ys[i], t_xs[i])
+    maximum_path_each(paths[i], values[i], t_ys[i], t_xs[i], pen)

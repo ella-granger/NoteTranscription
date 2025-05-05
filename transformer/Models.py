@@ -66,7 +66,8 @@ class Encoder(nn.Module):
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
-        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+        # self.layer_norm = nn.LayerNorm(d_model, eps=1e-6, elementwise_affine=False, bias=False)
+        self.batch_norm = nn.BatchNorm1d(d_model, affine=False, momentum=None, eps=0.0, track_running_stats=False)
         self.scale_emb = scale_emb
         self.d_model = d_model
 
@@ -84,7 +85,10 @@ class Encoder(nn.Module):
         enc_output = self.dropout(self.position_enc(enc_output))
         # print(enc_output.max().item(), enc_output.min().item())
         # _ = input()
-        enc_output = self.layer_norm(enc_output)
+        enc_output = torch.permute(enc_output, (0, 2, 1))
+        enc_output = self.batch_norm(enc_output)
+        enc_output = torch.permute(enc_output, (0, 2, 1))
+        # enc_output = self.layer_norm(enc_output)
 
         for enc_layer in self.layer_stack:
             enc_output, enc_slf_attn = enc_layer(enc_output, slf_attn_mask=src_mask)

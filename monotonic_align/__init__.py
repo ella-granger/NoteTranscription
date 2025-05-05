@@ -5,7 +5,7 @@ pyximport.install()
 from .core import maximum_path_c
 
 
-def maximum_path(neg_cent, mask):
+def maximum_path(neg_cent, mask, pen):
   """ Cython optimized version.
   neg_cent: [b, t_t, t_s]
   mask: [b, t_t, t_s]
@@ -17,7 +17,7 @@ def maximum_path(neg_cent, mask):
 
   t_t_max = mask.sum(1)[:, 0].data.cpu().numpy().astype(np.int32)
   t_s_max = mask.sum(2)[:, 0].data.cpu().numpy().astype(np.int32)
-  maximum_path_c(path, neg_cent, t_t_max, t_s_max)
+  maximum_path_c(path, neg_cent, t_t_max, t_s_max, pen)
   # print(path[0])
   # _ = input()
   path = (path == 0)

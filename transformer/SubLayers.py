@@ -25,7 +25,7 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
         if not enable_bn:
-            self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+            self.layer_norm = nn.LayerNorm(d_model, eps=1e-6, elementwise_affine=False, bias=False)
 
         self.enable_bn = enable_bn
         if enable_bn:
@@ -101,7 +101,7 @@ class PositionwiseFeedForward(nn.Module):
             self.batch_norm = nn.BatchNorm1d(d_in, affine=False, momentum=None, eps=0e-7, track_running_stats=False)
             # self.batch_norm = nn.BatchNorm1d(d_in)
         else:
-            self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
+            self.layer_norm = nn.LayerNorm(d_in, eps=1e-6, elementwise_affine=False, bias=False)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):

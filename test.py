@@ -170,8 +170,8 @@ def cal_metrics(pitch, start_t, end, pitch_p, start_t_p, end_p):
 @ex.config
 def cfg():
     # ckpt_id = "00120000"
-    ckpt_id = "best_00510600"
-    # ckpt_id = "cur"
+    # ckpt_id = "best_00510600"
+    ckpt_id = "cur"
     mix_k = 0
     ss_epsilon = 0
     epsilon = 0
@@ -191,7 +191,7 @@ def test(logdir, device, n_layers, checkpoint_interval, batch_size,
           output_interval, summary_interval, val_interval, ckpt_id,
           loss_norm, enable_encoder, scheduled_sampling_step,
           scheduled_sampling, prob_model, seg_len, time_lambda,
-          time_prj, end_ar):
+          time_prj, end_ar, align_step, jitter_time):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     logdir = Path(logdir)
     print_config(ex.current_run)
@@ -201,20 +201,23 @@ def test(logdir, device, n_layers, checkpoint_interval, batch_size,
     # data_path = "/storageNVME/huiran/NoteTranscription/BachChorale"
 
     data_path = Path(data_path)
-    test_data = MelDataset(data_path / "mel",
+    test_data = MelDataset(data_path / "mel_focus",
                            data_path / "note",
+                           data_path / "bm",
                            data_path / "test.json",
                            seg_len=seg_len,
                            device=device)
     print(len(test_data))
 
-    model = NoteTransformer(kernel_size=9,
+    model = NoteTransformer(kernel_size=5,
                             d_model=256,
                             d_inner=512,
                             n_layers=n_layers,
                             seg_len=seg_len,
                             enable_encoder=enable_encoder,
-                            prob_model=prob_model).to(device)
+                            prob_model=prob_model,
+                            time_prj=time_prj,
+                            end_ar=end_ar).to(device)
     ckpt_path = logdir / "ckpt" / ckpt_id
     ckpt_dict = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt_dict["model"])
